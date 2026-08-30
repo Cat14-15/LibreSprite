@@ -73,10 +73,12 @@ const char* WellKnownIntertwiners::AsRectangles = "as_rectangles";
 const char* WellKnownIntertwiners::AsEllipses = "as_ellipses";
 const char* WellKnownIntertwiners::AsBezier = "as_bezier";
 const char* WellKnownIntertwiners::AsPixelPerfect = "as_pixel_perfect";
+const char* WellKnownIntertwiners::AsGridCells = "as_grid_cells";
 
 const char* WellKnownPointShapes::None = "none";
 const char* WellKnownPointShapes::Pixel = "pixel";
 const char* WellKnownPointShapes::Brush = "brush";
+const char* WellKnownPointShapes::GridCell = "grid_cell";
 const char* WellKnownPointShapes::FloodFill = "floodfill";
 const char* WellKnownPointShapes::Spray = "spray";
 
@@ -112,6 +114,7 @@ ToolBox::ToolBox()
   m_pointshapers[WellKnownPointShapes::None] = new NonePointShape();
   m_pointshapers[WellKnownPointShapes::Pixel] = new PixelPointShape();
   m_pointshapers[WellKnownPointShapes::Brush] = new BrushPointShape();
+  m_pointshapers[WellKnownPointShapes::GridCell] = new GridCellPointShape();
   m_pointshapers[WellKnownPointShapes::FloodFill] = new FloodFillPointShape();
   m_pointshapers[WellKnownPointShapes::Spray] = new SprayPointShape();
 
@@ -121,6 +124,7 @@ ToolBox::ToolBox()
   m_intertwiners[WellKnownIntertwiners::AsEllipses] = new IntertwineAsEllipses();
   m_intertwiners[WellKnownIntertwiners::AsBezier] = new IntertwineAsBezier();
   m_intertwiners[WellKnownIntertwiners::AsPixelPerfect] = new IntertwineAsPixelPerfect();
+  m_intertwiners[WellKnownIntertwiners::AsGridCells] = new IntertwineAsGridCells();
 
   loadTools();
 

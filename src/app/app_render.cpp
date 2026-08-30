@@ -59,6 +59,7 @@ void AppRender::setupBackground(app::Document* doc, doc::PixelFormat pixelFormat
   setBgColor1(color_utils::color_for_image(docPref.bg.color1(), pixelFormat));
   setBgColor2(color_utils::color_for_image(docPref.bg.color2(), pixelFormat));
   setBgCheckedSize(tile);
+  setBgCheckedCentered(docPref.bg.centered());
 }
 
 }

@@ -10,12 +10,18 @@
 
 #include "base/injection.h"
 
+#include <functional>
+#include <vector>
+
 namespace script {
     class Engine;
     class Value;
 };
 
 namespace app {
+
+  class Document;
+  class Transaction;
 
   class AppScripting {
     void initEngine();
@@ -28,7 +34,18 @@ namespace app {
     static bool scanScript(const std::string& fullPath);
     static void clearEventHooks();
 
+    // All script mutations share one transaction per document. Successful
+    // evaluation commits them as one undo step; errors roll everything back.
+    static Transaction& transaction(Document* document);
+    static void afterSuccessfulEval(std::function<void()>&& callback);
+    static void afterEval(std::function<void(bool)>&& callback);
+    static bool requestStop();
+    static bool isRunning();
+    static void initMcpBridge();
+    static void exitMcpBridge();
+
     bool eval(const std::string& code);
+    bool evalPython(const std::string& code);
     void printLastResult();
   };
 

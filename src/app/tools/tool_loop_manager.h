@@ -68,6 +68,7 @@ public:
 private:
   void doLoopStep(bool last_step);
   void snapToGrid(gfx::Point& point);
+  bool appendSnappedFreehandCells(const gfx::Point& point, float pressure);
 
   void calculateDirtyArea(const Strokes& strokes);
 

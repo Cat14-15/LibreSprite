@@ -125,6 +125,10 @@ bool PopupWindow::onProcessMessage(Message* msg)
             Widget* picked = pick(mousePos);
             if (!picked || picked->window() != this) {
               closeWindow(NULL);
+              // Consume the click that dismissed this popup. Otherwise the
+              // same mouse-down continues to the editor underneath and can
+              // start a pencil stroke.
+              return true;
             }
             break;
           }
@@ -132,6 +136,7 @@ bool PopupWindow::onProcessMessage(Message* msg)
           case ClickBehavior::CloseOnClickOutsideHotRegion:
             if (!m_hotRegion.contains(mousePos)) {
               closeWindow(NULL);
+              return true;
             }
             break;
         }

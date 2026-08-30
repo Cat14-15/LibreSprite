@@ -100,6 +100,8 @@ protected:
     Menu menu;
     MenuItem rawFrames("Raw Images as Frames");
     MenuItem rawLayers("Raw Images as Layers");
+    rawFrames.setI18N();
+    rawLayers.setI18N();
     menu.addChild(&rawFrames);
     menu.addChild(&rawLayers);
 

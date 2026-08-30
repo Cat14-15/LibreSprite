@@ -15,6 +15,7 @@
 #include "app/context_access.h"
 #include "app/document.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/pref/preferences.h"
 #include "app/transaction.h"
 #include "base/convert_to.h"
@@ -97,11 +98,11 @@ void ModifySelectionCommand::onExecute(Context* context)
     Preferences& pref = Preferences::instance();
     ModifySelectionWindow window;
 
-    window.setText(getActionName() + " Selection");
+    window.setText(app::i18n(getActionName()) + " " + app::i18n("Selection"));
     if (m_modifier == Border)
-      window.byLabel()->setText("Width:");
+      window.byLabel()->setText(app::i18n("Width:"));
     else
-      window.byLabel()->setText(getActionName() + " By:");
+      window.byLabel()->setText(app::i18n(getActionName()) + " " + app::i18n("By:"));
 
     window.quantity()->setTextf("%d", pref.selection.modifySelectionQuantity());
 

@@ -27,6 +27,7 @@
 #include "app/modules/editors.h"
 #include "app/modules/gfx.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/transaction.h"
 #include "app/ui/app_menuitem.h"
 #include "app/ui/configure_timeline_popup.h"
@@ -40,6 +41,7 @@
 #include "app/ui_context.h"
 #include "app/util/clipboard.h"
 #include "base/convert_to.h"
+#include "base/bind.h"
 #include "base/memory.h"
 #include "base/scoped_value.h"
 #include "doc/doc.h"
@@ -59,13 +61,13 @@
 #define THUMBSIZE       (12*guiscale())
 
 // Height of the headers.
-#define HDRSIZE         THUMBSIZE
+#define HDRSIZE         (headerSize())
 
 // Width of the frames.
-#define FRMSIZE         THUMBSIZE
+#define FRMSIZE         (frameSize())
 
 // Height of the layers.
-#define LAYSIZE         THUMBSIZE
+#define LAYSIZE         (layerSize())
 
 // Space between icons and other information in the layer.
 #define ICONSEP         (2*guiscale())
@@ -129,10 +131,15 @@ Timeline::Timeline()
   , m_separator_x(100 * guiscale())
   , m_separator_w(1)
   , m_confPopup(NULL)
+  , m_tipWindow(NULL)
   , m_clipboard_timer(100, this)
   , m_offset_count(0)
   , m_scroll(false)
   , m_fromTimeline(false)
+  , m_zoomOutButton("-")
+  , m_zoomResetButton("")
+  , m_zoomInButton("+")
+  , m_timelineScale(100)
 {
   enableFlags(CTRL_RIGHT_CLICK);
 
@@ -142,6 +149,10 @@ Timeline::Timeline()
 
   setDoubleBuffered(true);
   addChild(&m_aniControls);
+  m_zoomControls.addChild(&m_zoomOutButton);
+  m_zoomControls.addChild(&m_zoomResetButton);
+  m_zoomControls.addChild(&m_zoomInButton);
+  addChild(&m_zoomControls);
   addChild(&m_hbar);
   addChild(&m_vbar);
 
@@ -152,6 +163,26 @@ Timeline::Timeline()
   m_vbar.setBgColor(gfx::rgba(0, 0, 0, 128));
   m_hbar.setTransparent(true);
   m_vbar.setTransparent(true);
+
+  setup_mini_look(&m_zoomOutButton);
+  setup_mini_look(&m_zoomResetButton);
+  setup_mini_look(&m_zoomInButton);
+  m_zoomControls.setTransparent(true);
+  m_zoomControls.setBgColor(skinTheme()->colors.workspace());
+  m_zoomResetButton.setTextf("%d%%", m_timelineScale);
+  m_zoomOutButton.setEnabled(m_timelineScale > 50);
+  m_zoomInButton.setEnabled(m_timelineScale < 200);
+
+  m_zoomOutButton.Click.connect(base::Bind<void>(&Timeline::zoomTimelineOut, this));
+  m_zoomResetButton.Click.connect(base::Bind<void>(&Timeline::resetTimelineZoom, this));
+  m_zoomInButton.Click.connect(base::Bind<void>(&Timeline::zoomTimelineIn, this));
+
+  TooltipManager* zoomTooltips = new TooltipManager;
+  m_zoomControls.addChild(zoomTooltips);
+  zoomTooltips->addTooltipFor(&m_zoomOutButton, "Shrink Timeline Cells", BOTTOM);
+  zoomTooltips->addTooltipFor(&m_zoomResetButton, "Reset Timeline Cell Size", BOTTOM);
+  zoomTooltips->addTooltipFor(&m_zoomInButton, "Enlarge Timeline Cells", BOTTOM);
+  m_zoomControls.setVisible(false);
 }
 
 Timeline::~Timeline()
@@ -161,6 +192,7 @@ Timeline::~Timeline()
   detachDocument();
   m_context->documents().removeObserver(this);
   delete m_confPopup;
+  delete m_tipWindow;
 }
 
 void Timeline::updateUsingEditor(Editor* editor)
@@ -202,6 +234,7 @@ void Timeline::updateUsingEditor(Editor* editor)
   m_layer = site.layer();
   m_frame = site.frame();
   m_state = STATE_STANDBY;
+  m_zoomControls.setVisible(true);
   m_hot.part = PART_NOTHING;
   m_clk.part = PART_NOTHING;
 
@@ -222,6 +255,8 @@ void Timeline::detachDocument()
     m_editor->removeObserver(this);
     m_editor = NULL;
   }
+
+  m_zoomControls.setVisible(false);
 
   invalidate();
 }
@@ -458,6 +493,7 @@ bool Timeline::onProcessMessage(Message* msg)
     }
 
     case kMouseLeaveMessage: {
+      closeTooltip();
       if (m_hot.part != PART_NOTHING) {
         invalidateHit(m_hot);
         m_hot = Hit();
@@ -507,7 +543,7 @@ bool Timeline::onProcessMessage(Message* msg)
         // we shouldn't change the hot (so the separator can be
         // tracked to the mouse's released).
         if (m_clk.part == PART_SEPARATOR) {
-          m_separator_x = MAX(0, mousePos.x);
+          m_separator_x = MAX(100*guiscale(), mousePos.x);
           layout();
           return true;
         }
@@ -871,12 +907,22 @@ bool Timeline::onProcessMessage(Message* msg)
 
         dx += static_cast<MouseMessage*>(msg)->wheelDelta().x;
 
-        if (msg->ctrlPressed())
-          dx = dz * FRMSIZE;
+        if (msg->ctrlPressed()) {
+          const gfx::Point anchor =
+            static_cast<MouseMessage*>(msg)->position() - bounds().origin();
+          setTimelineScale(m_timelineScale +
+                           ((static_cast<MouseMessage*>(msg)->wheelDelta().x - dz) > 0 ? 25: -25),
+                           anchor);
+          return true;
+        }
+        else if (msg->shiftPressed()) {
+          dx = dz * FRMSIZE * 3;
+          dy = 0;
+        }
         else
           dy = dz * LAYSIZE;
 
-        if (msg->shiftPressed()) {
+        if (!msg->shiftPressed() && (dx || dy)) {
           dx *= 3;
           dy *= 3;
         }
@@ -912,6 +958,11 @@ void Timeline::onResize(ui::ResizeEvent& ev)
     gfx::Rect(rc.x, rc.y, MIN(sz.w, m_separator_x),
       font()->height() +
       skinTheme()->dimensions.timelineTagsAreaHeight()));
+
+  gfx::Size zoomSize = m_zoomControls.sizeHint();
+  m_zoomControls.setBounds(
+    gfx::Rect(rc.x2()-zoomSize.w, rc.y, zoomSize.w,
+      font()->height() + skinTheme()->dimensions.timelineTagsAreaHeight()));
 
   updateScrollBars();
 }
@@ -2128,6 +2179,64 @@ void Timeline::setHot(const Hit& hit)
 
     // Change the new 'hot' thing.
     m_hot = hit;
+    updateTooltip(hit);
+  }
+}
+
+void Timeline::updateTooltip(const Hit& hit)
+{
+  closeTooltip();
+
+  if (hasCapture())
+    return;
+
+  const char* text = nullptr;
+  switch (hit.part) {
+    case PART_SEPARATOR:
+      text = "Drag to resize the layer area";
+      break;
+    case PART_HEADER_EYE:
+      text = "Show or hide all layers";
+      break;
+    case PART_HEADER_PADLOCK:
+      text = "Lock or unlock all layers";
+      break;
+    case PART_HEADER_CONTINUOUS:
+      text = "Set continuous cels for all layers";
+      break;
+    case PART_HEADER_GEAR:
+      text = "Timeline settings";
+      break;
+    case PART_HEADER_ONIONSKIN:
+      text = "Enable or disable onion skin";
+      break;
+    case PART_LAYER_EYE_ICON:
+      text = "Show or hide this layer";
+      break;
+    case PART_LAYER_PADLOCK_ICON:
+      text = "Lock or unlock this layer";
+      break;
+    case PART_LAYER_CONTINUOUS_ICON:
+      text = "Prefer linked or individual cels";
+      break;
+  }
+
+  if (!text)
+    return;
+
+  m_tipWindow = new TipWindow(app::i18n(text));
+  m_tipWindow->remapWindow();
+  gfx::Rect target = getPartBounds(hit).offset(bounds().origin());
+  m_tipWindow->pointAt(BOTTOM, target);
+  m_tipWindow->openWindow();
+}
+
+void Timeline::closeTooltip()
+{
+  if (m_tipWindow) {
+    m_tipWindow->closeWindow(NULL);
+    delete m_tipWindow;
+    m_tipWindow = NULL;
   }
 }
 
@@ -2139,22 +2248,22 @@ void Timeline::updateStatusBar(ui::Message* msg)
   StatusBar* sb = StatusBar::instance();
 
   if (m_state == STATE_MOVING_RANGE) {
-    const char* verb = isCopyKeyPressed(msg) ? "Copy": "Move";
+    const std::string verb = app::i18n(isCopyKeyPressed(msg) ? "Copy": "Move");
 
     switch (m_range.type()) {
 
       case Range::kCels:
-        sb->setStatusText(0, "%s cels", verb);
+        sb->setStatusText(0, "%s cels", verb.c_str());
         break;
 
       case Range::kFrames:
         if (validFrame(m_hot.frame)) {
           if (m_dropTarget.hhit == DropTarget::Before) {
-            sb->setStatusText(0, "%s before frame %d", verb, int(m_dropRange.frameBegin()+1));
+            sb->setStatusText(0, "%s before frame %d", verb.c_str(), int(m_dropRange.frameBegin()+1));
             return;
           }
           else if (m_dropTarget.hhit == DropTarget::After) {
-            sb->setStatusText(0, "%s after frame %d", verb, int(m_dropRange.frameEnd()+1));
+            sb->setStatusText(0, "%s after frame %d", verb.c_str(), int(m_dropRange.frameEnd()+1));
             return;
           }
         }
@@ -2170,11 +2279,11 @@ void Timeline::updateStatusBar(ui::Message* msg)
         Layer* layer = ((layerIdx >= 0 && layerIdx < (int)m_layers.size()) ? m_layers[layerIdx]: NULL);
         if (layer) {
           if (m_dropTarget.vhit == DropTarget::Bottom) {
-            sb->setStatusText(0, "%s at bottom of layer %s", verb, layer->name().c_str());
+            sb->setStatusText(0, "%s at bottom of layer %s", verb.c_str(), layer->name().c_str());
             return;
           }
           else if (m_dropTarget.vhit == DropTarget::Top) {
-            sb->setStatusText(0, "%s at top of layer %s", verb, layer->name().c_str());
+            sb->setStatusText(0, "%s at top of layer %s", verb.c_str(), layer->name().c_str());
             return;
           }
         }
@@ -2190,7 +2299,7 @@ void Timeline::updateStatusBar(ui::Message* msg)
 
       case PART_HEADER_ONIONSKIN: {
         sb->setStatusText(0, "Onionskin is %s",
-          docPref().onionskin.active() ? "enabled": "disabled");
+          app::i18n(docPref().onionskin.active() ? "enabled": "disabled").c_str());
         return;
       }
 
@@ -2198,8 +2307,8 @@ void Timeline::updateStatusBar(ui::Message* msg)
         if (layer != NULL) {
           sb->setStatusText(0, "Layer '%s' [%s%s]",
             layer->name().c_str(),
-            layer->isVisible() ? "visible": "hidden",
-            layer->isEditable() ? "": " locked");
+            app::i18n(layer->isVisible() ? "visible": "hidden").c_str(),
+            layer->isEditable() ? "": app::i18n(" locked").c_str());
           return;
         }
         break;
@@ -2208,7 +2317,7 @@ void Timeline::updateStatusBar(ui::Message* msg)
         if (layer != NULL) {
           sb->setStatusText(0, "Layer '%s' is %s",
             layer->name().c_str(),
-            layer->isVisible() ? "visible": "hidden");
+            app::i18n(layer->isVisible() ? "visible": "hidden").c_str());
           return;
         }
         break;
@@ -2217,7 +2326,8 @@ void Timeline::updateStatusBar(ui::Message* msg)
         if (layer != NULL) {
           sb->setStatusText(0, "Layer '%s' is %s",
             layer->name().c_str(),
-            layer->isEditable() ? "unlocked (editable)": "locked (read-only)");
+            app::i18n(layer->isEditable() ?
+              "unlocked (editable)": "locked (read-only)").c_str());
           return;
         }
         break;
@@ -2226,8 +2336,10 @@ void Timeline::updateStatusBar(ui::Message* msg)
         if (layer != NULL) {
           sb->setStatusText(0, "Layer '%s' is %s (%s)",
             layer->name().c_str(),
-            layer->isContinuous() ? "continuous": "discontinuous",
-            layer->isContinuous() ? "prefer linked cels/frames": "prefer individual cels/frames");
+            app::i18n(layer->isContinuous() ?
+              "continuous": "discontinuous").c_str(),
+            app::i18n(layer->isContinuous() ?
+              "prefer linked cels/frames": "prefer individual cels/frames").c_str());
           return;
         }
         break;
@@ -2250,7 +2362,7 @@ void Timeline::updateStatusBar(ui::Message* msg)
 #ifdef _DEBUG
             " (Image %d)"
 #endif
-            , cel ? "Cel": "Empty cel"
+            , app::i18n(cel ? "Cel": "Empty cel").c_str()
             , (int)m_hot.frame+1
 #ifdef _DEBUG
             , (cel ? cel->image()->id(): 0)
@@ -2602,6 +2714,76 @@ int Timeline::topHeight() const
     h += skinTheme()->dimensions.timelineTagsAreaHeight();
   }
   return h;
+}
+
+int Timeline::frameSize() const
+{
+  return MAX(6*guiscale(), 12*guiscale()*m_timelineScale/100);
+}
+
+int Timeline::layerSize() const
+{
+  return MAX(6*guiscale(), 12*guiscale()*m_timelineScale/100);
+}
+
+int Timeline::headerSize() const
+{
+  return layerSize();
+}
+
+void Timeline::setTimelineScale(int scale, const gfx::Point& anchor)
+{
+  scale = MID(50, scale, 200);
+  if (scale == m_timelineScale)
+    return;
+
+  const int oldFrameSize = frameSize();
+  const int oldLayerSize = layerSize();
+  gfx::Point scroll = viewScroll();
+
+  m_timelineScale = scale;
+
+  const int newFrameSize = frameSize();
+  const int newLayerSize = layerSize();
+  if (anchor.x >= m_separator_x) {
+    const int relativeX = anchor.x-m_separator_x;
+    scroll.x = (scroll.x+relativeX)*newFrameSize/oldFrameSize-relativeX;
+  }
+  else {
+    scroll.x = scroll.x*newFrameSize/oldFrameSize;
+  }
+
+  const int contentTop = topHeight()+oldLayerSize;
+  if (anchor.y >= contentTop) {
+    const int relativeY = anchor.y-contentTop;
+    scroll.y = (scroll.y+relativeY)*newLayerSize/oldLayerSize-relativeY;
+  }
+  else {
+    scroll.y = scroll.y*newLayerSize/oldLayerSize;
+  }
+
+  m_zoomResetButton.setTextf("%d%%", m_timelineScale);
+  m_zoomOutButton.setEnabled(m_timelineScale > 50);
+  m_zoomInButton.setEnabled(m_timelineScale < 200);
+  layout();
+  updateScrollBars();
+  setViewScroll(scroll);
+  invalidate();
+}
+
+void Timeline::zoomTimelineOut()
+{
+  setTimelineScale(m_timelineScale-25);
+}
+
+void Timeline::resetTimelineZoom()
+{
+  setTimelineScale(100);
+}
+
+void Timeline::zoomTimelineIn()
+{
+  setTimelineScale(m_timelineScale+25);
 }
 
 FrameTag* Timeline::Hit::getFrameTag() const

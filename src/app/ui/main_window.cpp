@@ -48,6 +48,7 @@ using namespace ui;
 
 MainWindow::MainWindow()
   : m_mode(NormalMode)
+  , m_colorBarVisible(true)
   , m_homeView(nullptr)
   , m_devConsoleView(nullptr)
 {
@@ -168,6 +169,12 @@ void MainWindow::alternateTouchbar() {
 void MainWindow::toggleTouchbar() {
   auto visible = !Preferences::instance().touchBar.visible();
   Preferences::instance().touchBar.visible(visible);
+  configureWorkspaceLayout();
+}
+
+void MainWindow::setColorBarVisibility(bool visible)
+{
+  m_colorBarVisible = visible;
   configureWorkspaceLayout();
 }
 
@@ -438,7 +445,7 @@ void MainWindow::configureWorkspaceLayout()
 
   m_menuBar->setVisible(normal);
   m_tabsBar->setVisible(normal);
-  colorBarPlaceholder()->setVisible(normal && isDoc);
+  colorBarPlaceholder()->setVisible(normal && isDoc && m_colorBarVisible);
   m_touchBar->setVisible(normal && isDoc && Preferences::instance().touchBar.visible());
   m_toolBar->setVisible(normal && isDoc);
   m_statusBar->setVisible(normal);

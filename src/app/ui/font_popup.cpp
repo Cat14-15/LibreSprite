@@ -14,6 +14,7 @@
 #include "app/commands/cmd_set_palette.h"
 #include "app/commands/commands.h"
 #include "app/console.h"
+#include "app/modules/i18n.h"
 #include "app/ui/skin/skin_theme.h"
 #include "app/ui_context.h"
 #include "app/util/freetype_utils.h"
@@ -133,6 +134,7 @@ FontPopup::FontPopup()
                 EnterBehavior::DoNothingOnEnter)
   , m_popup(new gen::FontPopup())
 {
+  setI18N();
   setAutoRemap(false);
   setBorder(gfx::Border(4*guiscale()));
 
@@ -181,7 +183,7 @@ FontPopup::FontPopup()
   }
 
   if (m_listBox.children().empty())
-    m_listBox.addChild(new ListItem("No system fonts were found"));
+    m_listBox.addChild(new ListItem(app::i18n("No system fonts were found")));
 }
 
 void FontPopup::showPopup(const gfx::Rect& bounds)

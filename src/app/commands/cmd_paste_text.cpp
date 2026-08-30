@@ -15,6 +15,7 @@
 #include "app/context.h"
 #include "app/file_selector.h"
 #include "app/modules/editors.h"
+#include "app/modules/i18n.h"
 #include "app/pref/preferences.h"
 #include "app/ui/drop_down_button.h"
 #include "app/ui/editor/editor.h"
@@ -90,13 +91,13 @@ public:
 private:
   void updateFontFaceButton() {
     fontFace()->mainButton()
-      ->setTextf("Select Font: %s",
+      ->setTextf(app::i18n("Select Font: %s").c_str(),
                  base::get_file_title(m_face).c_str());
   }
 
   void onSelectFontFile() {
     std::string face = show_file_selector(
-      "Select a TrueType Font",
+      app::i18n("Select a TrueType Font"),
       m_face,
       "ttf,otf",
       FileSelectorType::Open,

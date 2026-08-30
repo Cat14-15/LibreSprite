@@ -47,6 +47,7 @@ ActiveToolManager::ActiveToolManager(ToolBox* toolbox)
   , m_rightClick(false)
   , m_rightClickTool(nullptr)
   , m_rightClickInk(nullptr)
+  , m_rightClickAssignedTool(nullptr)
   , m_proximityTool(nullptr)
   , m_selectedTool(m_toolbox->getToolById(WellKnownTools::Pencil)) // "pencil" is the active tool by default
 {
@@ -54,11 +55,14 @@ ActiveToolManager::ActiveToolManager(ToolBox* toolbox)
 
 Tool* ActiveToolManager::activeTool() const
 {
-  if (m_quickTool)
-    return m_quickTool;
-
+  // A mouse-button assignment must win over keyboard quick tools while
+  // that button is held, otherwise the assigned tool can appear selected
+  // in the toolbar but the previous tool is still used on the canvas.
   if (m_rightClickTool)
     return m_rightClickTool;
+
+  if (m_quickTool)
+    return m_quickTool;
 
   if (m_proximityTool)
     return m_proximityTool;
@@ -70,11 +74,19 @@ Tool* ActiveToolManager::activeTool() const
 
 std::shared_ptr<Ink> ActiveToolManager::activeInk() const
 {
-  if (!m_quickTool && m_rightClickInk)
+  if (m_rightClickInk)
     return m_rightClickInk;
 
   Tool* tool = activeTool();
-  std::shared_ptr<Ink> ink = tool->getInk(m_rightClick ? 1: 0);
+  // A tool explicitly assigned to the right button uses that tool's
+  // primary action. Without an assignment, keep the original secondary
+  // action (e.g. Pencil paints with the background color).
+  const bool assignedRight =
+    (m_rightClick &&
+     m_rightClickAssignedTool &&
+     m_rightClickTool == m_rightClickAssignedTool);
+  std::shared_ptr<Ink> ink = tool->getInk(
+    assignedRight ? 0: (m_rightClick ? 1: 0));
   if (ink->isPaint() && !ink->isEffect()) {
     tools::InkType inkType = Preferences::instance().tool(tool).ink();
     const char* id = nullptr;
@@ -123,6 +135,11 @@ Tool* ActiveToolManager::selectedTool() const
   return m_selectedTool;
 }
 
+Tool* ActiveToolManager::rightClickAssignedTool() const
+{
+  return m_rightClickAssignedTool;
+}
+
 void ActiveToolManager::newToolSelectedInToolBar(Tool* tool)
 {
   ActiveToolChangeTrigger trigger(this);
@@ -161,7 +178,10 @@ void ActiveToolManager::pressButton(const Pointer& pointer)
   if (pointer.button() == Pointer::Right) {
     m_rightClick = true;
 
-    if (isToolAffectedByRightClickMode(activeTool())) {
+    if (m_rightClickAssignedTool) {
+      tool = m_rightClickAssignedTool;
+    }
+    else if (isToolAffectedByRightClickMode(activeTool())) {
       switch (Preferences::instance().editor.rightClickMode()) {
         case app::gen::RightClickMode::PAINT_BGCOLOR:
           // Do nothing, use the active tool
@@ -204,6 +224,15 @@ void ActiveToolManager::setSelectedTool(Tool* tool)
 
   m_selectedTool = tool;
   notifyObservers(&ActiveToolObserver::onSelectedToolChange, tool);
+}
+
+void ActiveToolManager::toggleRightClickAssignedTool(Tool* tool)
+{
+  m_rightClickAssignedTool =
+    (m_rightClickAssignedTool == tool ? nullptr: tool);
+  notifyObservers(
+    &ActiveToolObserver::onRightClickToolChange,
+    m_rightClickAssignedTool);
 }
 
 // static

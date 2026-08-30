@@ -302,5 +302,39 @@ public:
   }
 };
 
+class IntertwineAsGridCells : public Intertwine {
+  gfx::Point m_lastCell;
+  bool m_hasLastCell = false;
+
+  void drawCell(ToolLoop* loop, int x, int y, float pressure) {
+    const gfx::Point cell(x, y);
+    if (m_hasLastCell && cell == m_lastCell)
+      return;
+    doPointshapePoint(x, y, pressure, loop);
+    m_lastCell = cell;
+    m_hasLastCell = true;
+  }
+
+public:
+  void prepareIntertwine() override {
+    m_hasLastCell = false;
+  }
+
+  void joinStroke(ToolLoop* loop, const Stroke& stroke) override {
+    if (stroke.empty())
+      return;
+
+    // ToolLoopManager already supplies every crossed cell, including partial
+    // cells at canvas edges. Preserve those inside-canvas representative
+    // points instead of reconstructing an out-of-canvas cell center here.
+    for (const auto& point : stroke)
+      drawCell(loop, point.x, point.y, point.pressure);
+  }
+
+  void fillStroke(ToolLoop* loop, const Stroke& stroke) override {
+    joinStroke(loop, stroke);
+  }
+};
+
 } // namespace tools
 } // namespace app

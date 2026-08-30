@@ -31,6 +31,7 @@ PalettePopup::PalettePopup()
   : PopupWindow("Palettes", ClickBehavior::CloseOnClickInOtherWindow)
   , m_popup(new gen::PalettePopup())
 {
+  setI18N();
   setAutoRemap(false);
   setBorder(gfx::Border(4*guiscale()));
 

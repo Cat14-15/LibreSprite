@@ -110,7 +110,9 @@ void SpritePropertiesCommand::onExecute(Context* context)
       window.transparentColorPlaceholder()->addChild(color_button);
     }
     else {
-      window.transparentColorPlaceholder()->addChild(new Label("(only for indexed images)"));
+      auto indexedOnly = new Label("(only for indexed images)");
+      indexedOnly->setI18N();
+      window.transparentColorPlaceholder()->addChild(indexedOnly);
     }
   }
 

@@ -106,6 +106,7 @@ namespace render {
     void setBgColor1(color_t color);
     void setBgColor2(color_t color);
     void setBgCheckedSize(const gfx::Size& size);
+    void setBgCheckedCentered(bool state);
 
     // Sets the preview image. This preview image is an alternative
     // image to be used for the given layer/frame.
@@ -219,6 +220,7 @@ namespace render {
     color_t m_bgColor1;
     color_t m_bgColor2;
     gfx::Size m_bgCheckedSize;
+    bool m_bgCheckedCentered;
     int m_globalOpacity;
     const Layer* m_selectedLayer;
     frame_t m_selectedFrame;

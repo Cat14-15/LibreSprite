@@ -6,6 +6,10 @@
 // published by the Free Software Foundation.
 
 #include "app/modules/palettes.h"
+#include "app/document.h"
+#include "app/document_api.h"
+#include "app/script/app_scripting.h"
+#include "app/ui_context.h"
 #include "doc/object.h"
 #include "doc/palette.h"
 #include "doc/image.h"
@@ -25,6 +29,7 @@ public:
                 },
                 [this](int s){
                   if (auto pal = palette()) {
+                    prepareMutation();
                     pal->resize(s);
                     modify();
                   }
@@ -38,6 +43,11 @@ public:
     });
 
     addMethod("set", &PaletteScriptObject::set);
+
+    addMethod("setColors", &PaletteScriptObject::setColors)
+      .doc("Sets consecutive palette entries from color arguments.")
+      .docArg("startIndex", "First palette index.")
+      .docArg("colors", "One or more packed colors.");
   }
 
   doc::Palette* palette() {
@@ -48,18 +58,7 @@ public:
   }
 
   void modify() {
-      if (needIncrement)
-          return;
-      needIncrement = true;
-      getEngine()->afterEval([=, this](bool success){
-        auto pal = palette();
-        if (pal) {
-          pal->incrementVersion();
-          app::set_current_palette(pal, true);
-          ui::Manager::getDefault()->invalidate();
-        }
-        needIncrement = false;
-      });
+    needIncrement = true;
   }
 
   void set(int i){
@@ -78,11 +77,62 @@ public:
       c = doc::rgba(args[1], args[2], args[3], args[4]);
     } else
       return;
+    prepareMutation();
     pal->setEntry(i, c);
     modify();
   }
 
+  void setColors(int startIndex) {
+    auto pal = palette();
+    auto& args = script::Function::varArgs();
+    if (!pal || startIndex < 0 || args.size() < 2)
+      return;
+    prepareMutation();
+    const int colorCount = int(args.size())-1;
+    if (startIndex+colorCount > pal->size())
+      pal->resize(startIndex+colorCount);
+    for (int i=0; i<colorCount; ++i)
+      pal->setEntry(startIndex+i, int(args[i+1]));
+    modify();
+  }
+
+  void prepareMutation() {
+    if (m_before)
+      return;
+    m_before = palette()->clone();
+    m_document = app::UIContext::instance()->activeDocument();
+    if (m_document && m_document->sprite()->palette(0) != palette())
+      m_document = nullptr;
+
+    getEngine()->afterEval([this](bool success) {
+      auto current = palette()->clone();
+      m_before->copyColorsTo(*palette());
+      if (success) {
+        if (m_document) {
+          if (m_before->countDiff(*current, nullptr, nullptr) > 0) {
+            app::DocumentApi(m_document,
+                             app::AppScripting::transaction(m_document))
+              .setPalette(m_document->sprite(), 0, current.get());
+          }
+        }
+        else {
+          current->copyColorsTo(*palette());
+          palette()->incrementVersion();
+        }
+      }
+      palette()->incrementVersion();
+      app::set_current_palette(palette(), true);
+      if (ui::Manager::getDefault())
+        ui::Manager::getDefault()->invalidate();
+      m_before.reset();
+      m_document = nullptr;
+      needIncrement = false;
+    });
+  }
+
   bool needIncrement = false;
+  std::shared_ptr<doc::Palette> m_before;
+  app::Document* m_document = nullptr;
 };
 
 static script::ScriptObject::Regular<PaletteScriptObject> palSO(typeid(doc::Palette*).name());

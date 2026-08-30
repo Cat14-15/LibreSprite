@@ -20,6 +20,7 @@
 #include "app/ini_file.h"
 #include "app/modules/editors.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/transaction.h"
 #include "app/ui/color_bar.h"
 #include "app/ui/color_button.h"
@@ -97,6 +98,7 @@ void MaskByColorCommand::onExecute(Context* context)
     return;
 
   m_window = new Window(Window::WithTitleBar, "Mask by Color");
+  m_window->setI18N();
   box1 = new Box(VERTICAL);
   box2 = new Box(HORIZONTAL);
   box3 = new Box(HORIZONTAL);
@@ -108,6 +110,7 @@ void MaskByColorCommand::onExecute(Context* context)
                      ColorBar::instance()->getFgColor()),
     sprite->pixelFormat());
   label_tolerance = new Label("Tolerance:");
+  label_tolerance->setI18N();
   m_sliderTolerance = new Slider(0, 255, get_config_int("MaskColor", "Tolerance", 0));
   m_checkPreview = new CheckBox("&Preview");
   button_ok = new Button("&OK");
@@ -210,7 +213,8 @@ void MaskByColorCommand::maskPreview(const ContextReader& reader)
 
 #ifdef SHOW_BOUNDARIES_GEN_PERFORMANCE
       double time = chrono.elapsed();
-      m_window->setText("Mask by Color (" + base::convert_to<std::string>(time) + ")");
+      m_window->setText(app::i18n("Mask by Color") + " (" +
+                        base::convert_to<std::string>(time) + ")");
 #endif
 
       update_screen_for_document(writer.document());

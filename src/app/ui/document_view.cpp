@@ -21,6 +21,7 @@
 #include "app/context_access.h"
 #include "app/document_access.h"
 #include "app/modules/editors.h"
+#include "app/modules/i18n.h"
 #include "app/modules/palettes.h"
 #include "app/pref/preferences.h"
 #include "app/transaction.h"
@@ -252,7 +253,7 @@ bool DocumentView::onCloseView(Workspace* workspace, bool quitting)
                               "<<\"%s\" before %s?"
                               "||&Save||Do&n't Save||&Cancel",
                               m_document->name().c_str(),
-                              quitting ? "quitting": "closing");
+                              i18n(quitting ? "quitting": "closing").c_str());
 
         if (ret == 1) {
           // "save": save the changes

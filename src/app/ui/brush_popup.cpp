@@ -16,6 +16,7 @@
 #include "app/commands/command.h"
 #include "app/commands/commands.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/modules/palettes.h"
 #include "app/pref/preferences.h"
 #include "app/tools/tool.h"
@@ -159,6 +160,10 @@ private:
     AppMenuItem lockItem("Locked");
     AppMenuItem deleteItem("Delete");
     AppMenuItem deleteAllItem("Delete All");
+    save.setI18N();
+    lockItem.setI18N();
+    deleteItem.setI18N();
+    deleteAllItem.setI18N();
 
     lockItem.setSelected(m_brushes.isBrushSlotLocked(m_slot));
 
@@ -255,7 +260,7 @@ private:
 class NewCustomBrushItem : public ButtonSet::Item {
 public:
   NewCustomBrushItem() {
-    setText("Save Brush");
+    setText(app::i18n("Save Brush"));
   }
 
 private:

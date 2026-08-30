@@ -28,6 +28,7 @@
 #include "base/bind.h"
 #include "base/signal.h"
 #include "gfx/size.h"
+#include "she/font.h"
 #include "she/surface.h"
 #include "ui/ui.h"
 
@@ -72,6 +73,59 @@ static Size getToolIconSize(Widget* widget)
     return Size(icon->width(), icon->height());
   else
     return Size(16, 16) * guiscale();
+}
+
+static Size getToolButtonSize(Widget* widget)
+{
+  SkinTheme* theme = static_cast<SkinTheme*>(widget->theme());
+  Size size = getToolIconSize(widget);
+  const int badgeW = MAX(
+    theme->getMiniFont()->textLength(app::i18n("L")),
+    theme->getMiniFont()->textLength(app::i18n("R")))+2*guiscale();
+  size.w += 2*(badgeW+1*guiscale());
+  return size;
+}
+
+static void drawToolAssignments(Graphics* g,
+                                Widget* widget,
+                                const Rect& bounds,
+                                Tool* tool)
+{
+  ActiveToolManager* manager = App::instance()->activeToolManager();
+  const bool left = (manager->selectedTool() == tool);
+  const bool right = (manager->rightClickAssignedTool() == tool);
+  if (!left && !right)
+    return;
+
+  SkinTheme* theme = static_cast<SkinTheme*>(widget->theme());
+  auto oldFont = g->font();
+  auto font = theme->getMiniFont();
+  g->setFont(font);
+
+  const std::string leftLabel = app::i18n("L");
+  const std::string rightLabel = app::i18n("R");
+  const int badgeW = MAX(font->textLength(leftLabel),
+                         font->textLength(rightLabel))+2*guiscale();
+  const int badgeH = font->height()+2*guiscale();
+  const int y = bounds.y+bounds.h/2-badgeH/2;
+
+  if (left) {
+    Rect badge(bounds.x+1*guiscale(), y, badgeW, badgeH);
+    g->fillRect(theme->colors.buttonSelectedFace(), badge);
+    g->drawRect(theme->colors.buttonSelectedText(), badge);
+    g->drawString(leftLabel, theme->colors.buttonSelectedText(), ColorNone,
+      Point(badge.x+guiscale(), badge.y+guiscale()));
+  }
+
+  if (right) {
+    Rect badge(bounds.x2()-badgeW-1*guiscale()+1, y, badgeW, badgeH);
+    g->fillRect(theme->colors.buttonHotFace(), badge);
+    g->drawRect(theme->colors.buttonHotText(), badge);
+    g->drawString(rightLabel, theme->colors.buttonHotText(), ColorNone,
+      Point(badge.x+guiscale(), badge.y+guiscale()));
+  }
+
+  g->setFont(oldFont);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -137,6 +191,13 @@ bool ToolBar::onProcessMessage(Message* msg)
         toolrc = getToolGroupBounds(c);
         if (mouseMsg->position().y >= toolrc.y &&
             mouseMsg->position().y < toolrc.y+toolrc.h) {
+          if (mouseMsg->right()) {
+            App::instance()->activeToolManager()
+              ->toggleRightClickAssignedTool(tool);
+            invalidate();
+            return true;
+          }
+
           selectTool(tool);
 
           openPopupWindow(c, tool_group);
@@ -284,7 +345,7 @@ bool ToolBar::onProcessMessage(Message* msg)
 
 void ToolBar::onSizeHint(SizeHintEvent& ev)
 {
-  Size iconsize = getToolIconSize(this);
+  Size iconsize = getToolButtonSize(this);
   iconsize.w += border().width();
   iconsize.h += border().height();
   ev.setSizeHint(iconsize);
@@ -332,6 +393,8 @@ void ToolBar::onPaint(ui::PaintEvent& ev)
         toolrc.x+toolrc.w/2-icon->width()/2,
         toolrc.y+toolrc.h/2-icon->height()/2);
     }
+
+    drawToolAssignments(g, this, toolrc, tool);
   }
 
   // Draw button to show/hide preview
@@ -441,7 +504,7 @@ Rect ToolBar::getToolGroupBounds(int group_index)
 {
   ToolBox* toolbox = App::instance()->toolBox();
   int groups = toolbox->getGroupsCount();
-  Size iconsize = getToolIconSize(this);
+  Size iconsize = getToolButtonSize(this);
   Rect rc(bounds());
   rc.shrink(border());
 
@@ -465,7 +528,7 @@ Rect ToolBar::getToolGroupBounds(int group_index)
 Point ToolBar::getToolPositionInGroup(int group_index, Tool* tool)
 {
   ToolBox* toolbox = App::instance()->toolBox();
-  Size iconsize = getToolIconSize(this);
+  Size iconsize = getToolButtonSize(this);
   int nth = 0;
 
   for (ToolIterator it = toolbox->begin(); it != toolbox->end(); ++it) {
@@ -504,6 +567,14 @@ void ToolBar::openTipWindow(int group_index, Tool* tool)
       tooltip += "\n\n" + app::i18n("Shortcut: ");
       tooltip += key->accels().front().toString();
     }
+
+    if (App::instance()->activeToolManager()->selectedTool() == tool)
+      tooltip += "\n\n" + app::i18n("Left-click tool assigned");
+
+    if (App::instance()->activeToolManager()->rightClickAssignedTool() == tool)
+      tooltip += "\n\n" + app::i18n("Right-click assigned (right-click again to clear)");
+    else
+      tooltip += "\n\n" + app::i18n("Right-click to assign as a quick tool");
   }
   else if (group_index == PreviewVisibilityIndex) {
     if (App::instance()->mainWindow()->getPreviewEditor()->isPreviewEnabled())
@@ -633,8 +704,19 @@ bool ToolBar::ToolStrip::onProcessMessage(Message* msg)
       }
 
       if (hasCapture()) {
-        if (m_hotTool)
-          m_toolbar->selectTool(m_hotTool);
+        if (m_hotTool) {
+          if (mouseMsg->right()) {
+            if (msg->type() == kMouseDownMessage) {
+              App::instance()->activeToolManager()
+                ->toggleRightClickAssignedTool(m_hotTool);
+              m_toolbar->invalidate();
+              invalidate();
+            }
+          }
+          else {
+            m_toolbar->selectTool(m_hotTool);
+          }
+        }
 
         Widget* pick = manager()->pick(mouseMsg->position());
         if (ToolBar* bar = dynamic_cast<ToolBar*>(pick)) {
@@ -676,7 +758,7 @@ void ToolBar::ToolStrip::onSizeHint(SizeHintEvent& ev)
     }
   }
 
-  Size iconsize = getToolIconSize(this);
+  Size iconsize = getToolButtonSize(this);
   ev.setSizeHint(Size(iconsize.w * c, iconsize.h));
 }
 
@@ -716,6 +798,9 @@ void ToolBar::ToolStrip::onPaint(PaintEvent& ev)
           toolrc.x+toolrc.w/2-icon->width()/2,
           toolrc.y+toolrc.h/2-icon->height()/2);
       }
+
+
+      drawToolAssignments(g, this, toolrc, tool);
     }
   }
 }
@@ -723,7 +808,7 @@ void ToolBar::ToolStrip::onPaint(PaintEvent& ev)
 Rect ToolBar::ToolStrip::getToolBounds(int index)
 {
   const Rect& bounds(this->bounds());
-  Size iconsize = getToolIconSize(this);
+  Size iconsize = getToolButtonSize(this);
 
   return Rect(bounds.x+index*(iconsize.w-1), bounds.y,
               iconsize.w, bounds.h);

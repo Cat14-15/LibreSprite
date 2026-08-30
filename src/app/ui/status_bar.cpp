@@ -18,6 +18,7 @@
 #include "app/modules/editors.h"
 #include "app/modules/gfx.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/modules/palettes.h"
 #include "app/pref/preferences.h"
 #include "app/tools/active_tool.h"
@@ -400,31 +401,25 @@ private:
 
 // TODO Use a ui::TipWindow with rounded borders, when we add support
 //      to invalidate transparent windows.
-class StatusBar::SnapToGridWindow : public ui::PopupWindow {
+// Left-click toggles the grid. Right-click keeps quick access to the
+// per-project grid size/offset dialog.
+class GridToggleButton : public Button {
 public:
-  SnapToGridWindow()
-    : ui::PopupWindow("", ClickBehavior::DoNothingOnClick)
-    , m_button("Disable Snap to Grid") {
-    setBorder(gfx::Border(2 * guiscale()));
-    setBgColor(gfx::rgba(255, 255, 200));
-    makeFloating();
-
-    addChild(&m_button);
-    m_button.Click.connect(base::Bind<void>(&SnapToGridWindow::onDisableSnapToGrid, this));
+  GridToggleButton()
+    : Button("GRID") {
   }
 
-  void setDocument(app::Document* doc) {
-    m_doc = doc;
+protected:
+  bool onProcessMessage(Message* msg) override {
+    if (msg->type() == kMouseDownMessage &&
+        static_cast<MouseMessage*>(msg)->right()) {
+      Command* cmd = CommandsModule::instance()->getCommandByName(
+        CommandId::GridSettings);
+      UIContext::instance()->executeCommand(cmd);
+      return true;
+    }
+    return Button::onProcessMessage(msg);
   }
-
-private:
-  void onDisableSnapToGrid() {
-    Preferences::instance().document(m_doc).grid.snap(false);
-    closeWindow(nullptr);
-  }
-
-  app::Document* m_doc;
-  ui::Button m_button;
 };
 
 // This widget is used to show the current frame.
@@ -484,9 +479,14 @@ StatusBar::StatusBar()
   : m_timeout(0)
   , m_indicators(new Indicators)
   , m_docControls(new HBox)
+  , m_workspaceControls(new HBox)
+  , m_gridSettings(new GridToggleButton)
+  , m_pixelGridToggle(new Button("PIXEL"))
+  , m_checkedBgButton(new Button("BG16"))
+  , m_paletteToggle(new Button("PAL"))
+  , m_timelineToggle(new Button("TIME"))
   , m_doc(nullptr)
   , m_tipwindow(nullptr)
-  , m_snapToGridWindow(nullptr)
 {
   m_instance = this;
 
@@ -503,8 +503,40 @@ StatusBar::StatusBar()
 
   m_indicators->setExpansive(true);
   m_docControls->setVisible(false);
+  m_workspaceControls->setVisible(false);
+  m_gridSettings->Click.connect(
+    base::Bind<void>(&StatusBar::toggleGrid, this));
+  m_pixelGridToggle->Click.connect(
+    base::Bind<void>(&StatusBar::togglePixelGrid, this));
+  m_checkedBgButton->Click.connect(
+    base::Bind<void>(&StatusBar::showCheckedBgMenu, this));
+  m_paletteToggle->Click.connect(
+    base::Bind<void>(&StatusBar::togglePalette, this));
+  m_timelineToggle->Click.connect(
+    base::Bind<void>(&StatusBar::toggleTimeline, this));
+  setup_mini_look(m_gridSettings);
+  setup_mini_look(m_pixelGridToggle);
+  setup_mini_look(m_checkedBgButton);
+  setup_mini_look(m_paletteToggle);
+  setup_mini_look(m_timelineToggle);
+
+  // These are mouse toolbar controls, not text-entry buttons. Keeping
+  // keyboard focus on one after it is clicked makes the next Space key (or
+  // the key-up after another shortcut) click it again, opening the checked
+  // background menu or hiding palette/timeline panels unexpectedly.
+  m_gridSettings->setFocusStop(false);
+  m_pixelGridToggle->setFocusStop(false);
+  m_checkedBgButton->setFocusStop(false);
+  m_paletteToggle->setFocusStop(false);
+  m_timelineToggle->setFocusStop(false);
   addChild(m_indicators);
   addChild(m_docControls);
+  m_workspaceControls->addChild(m_gridSettings);
+  m_workspaceControls->addChild(m_pixelGridToggle);
+  m_workspaceControls->addChild(m_checkedBgButton);
+  m_workspaceControls->addChild(m_paletteToggle);
+  m_workspaceControls->addChild(m_timelineToggle);
+  addChild(m_workspaceControls);
 
   // Construct the commands box
   {
@@ -540,10 +572,20 @@ StatusBar::StatusBar()
   tooltipManager->addTooltipFor(m_currentFrame, "Current Frame", BOTTOM);
   tooltipManager->addTooltipFor(m_zoomEntry, "Zoom Level", BOTTOM);
   tooltipManager->addTooltipFor(m_newFrame, "New Frame", BOTTOM);
+  tooltipManager->addTooltipFor(
+    m_gridSettings, "Show Grid (right-click for settings)", BOTTOM);
+  tooltipManager->addTooltipFor(m_pixelGridToggle, "Show Pixel Grid", BOTTOM);
+  tooltipManager->addTooltipFor(m_checkedBgButton, "Checked Background Size", BOTTOM);
+  tooltipManager->addTooltipFor(m_paletteToggle, "Show/Hide Palette", BOTTOM);
+  tooltipManager->addTooltipFor(m_timelineToggle, "Switch Timeline", BOTTOM);
 
   UIContext::instance()->addObserver(this);
   UIContext::instance()->documents().addObserver(this);
+  m_afterCmdConn = UIContext::instance()->AfterCommandExecution.connect(
+    &StatusBar::onAfterCommandExecution, this);
   App::instance()->activeToolManager()->addObserver(this);
+
+  updateWorkspaceButtons();
 }
 
 StatusBar::~StatusBar()
@@ -553,7 +595,6 @@ StatusBar::~StatusBar()
   UIContext::instance()->removeObserver(this);
 
   delete m_tipwindow;           // widget
-  delete m_snapToGridWindow;
 }
 
 void StatusBar::onSelectedToolChange(tools::Tool* tool)
@@ -578,9 +619,10 @@ bool StatusBar::setStatusText(int msecs, const char *format, ...)
   if ((base::current_tick() > m_timeout) || (msecs > 0)) {
     char buf[256];              // TODO warning buffer overflow
     va_list ap;
+    const std::string translated = app::i18n(format, format);
 
     va_start(ap, format);
-    vsnprintf(buf, sizeof(buf), format, ap);
+    vsnprintf(buf, sizeof(buf), translated.c_str(), ap);
     va_end(ap);
 
     IndicatorsGeneration(m_indicators).add(buf);
@@ -596,9 +638,10 @@ void StatusBar::showTip(int msecs, const char *format, ...)
   char buf[256];                // TODO warning buffer overflow
   va_list ap;
   int x, y;
+  const std::string translated = app::i18n(format, format);
 
   va_start(ap, format);
-  vsnprintf(buf, sizeof(buf), format, ap);
+  vsnprintf(buf, sizeof(buf), translated.c_str(), ap);
   va_end(ap);
 
   if (m_tipwindow == NULL) {
@@ -647,38 +690,6 @@ void StatusBar::showTool(int msecs, tools::Tool* tool)
   m_timeout = base::current_tick() + msecs;
 }
 
-void StatusBar::showSnapToGridWarning(bool state)
-{
-  if (state) {
-    ASSERT(m_doc);
-    if (!m_doc)
-      return;
-
-    if (!m_snapToGridWindow) {
-      m_snapToGridWindow = new SnapToGridWindow;
-    }
-
-    if (!m_snapToGridWindow->isVisible()) {
-      m_snapToGridWindow->openWindow();
-      m_snapToGridWindow->remapWindow();
-
-      Rect rc = bounds();
-      int toolBarWidth = ToolBar::instance()->sizeHint().w;
-
-      m_snapToGridWindow->positionWindow(
-        rc.x+rc.w-toolBarWidth-m_snapToGridWindow->bounds().w,
-        rc.y-m_snapToGridWindow->bounds().h);
-    }
-
-    m_snapToGridWindow->setDocument(
-      static_cast<app::Document*>(m_doc));
-  }
-  else {
-    if (m_snapToGridWindow)
-      m_snapToGridWindow->closeWindow(nullptr);
-  }
-}
-
 //////////////////////////////////////////////////////////////////////
 // StatusBar message handler
 
@@ -686,6 +697,7 @@ void StatusBar::onResize(ResizeEvent& ev)
 {
   Rect rc = ev.bounds();
   m_docControls->setVisible(m_doc && rc.w > 300*ui::guiscale());
+  m_workspaceControls->setVisible(m_doc != nullptr);
 
   HBox::onResize(ev);
 }
@@ -707,9 +719,7 @@ void StatusBar::onActiveSiteChange(const doc::Site& site)
     }
 
     m_docControls->setVisible(true);
-    showSnapToGridWarning(
-      Preferences::instance().document(
-        static_cast<app::Document*>(m_doc)).grid.snap());
+    m_workspaceControls->setVisible(true);
 
     // Current frame
     m_currentFrame->setTextf("%d", site.frame()+1);
@@ -717,8 +727,9 @@ void StatusBar::onActiveSiteChange(const doc::Site& site)
   else {
     ASSERT(m_doc == nullptr);
     m_docControls->setVisible(false);
-    showSnapToGridWarning(false);
+    m_workspaceControls->setVisible(false);
   }
+  updateWorkspaceButtons();
   layout();
 }
 
@@ -740,6 +751,136 @@ void StatusBar::newFrame()
 {
   Command* cmd = CommandsModule::instance()->getCommandByName(CommandId::NewFrame);
   UIContext::instance()->executeCommand(cmd);
+}
+
+void StatusBar::toggleGrid()
+{
+  Command* cmd = CommandsModule::instance()->getCommandByName(CommandId::ShowGrid);
+  UIContext::instance()->executeCommand(cmd);
+  updateWorkspaceButtons();
+}
+
+void StatusBar::togglePixelGrid()
+{
+  Command* cmd = CommandsModule::instance()->getCommandByName(CommandId::ShowPixelGrid);
+  UIContext::instance()->executeCommand(cmd);
+  updateWorkspaceButtons();
+}
+
+void StatusBar::showCheckedBgMenu()
+{
+  if (!m_doc)
+    return;
+
+  DocumentPreferences& pref = Preferences::instance().document(
+    static_cast<app::Document*>(m_doc));
+  Menu menu;
+  MenuItem size16("16x16");
+  MenuItem size8("8x8");
+  MenuItem size4("4x4");
+  MenuItem size2("2x2");
+  MenuItem centered(app::i18n("Center Checks on Canvas"));
+
+  const int type = int(pref.bg.type());
+  size16.setSelected(type == int(app::gen::BgType::CHECKED_16x16));
+  size8.setSelected(type == int(app::gen::BgType::CHECKED_8x8));
+  size4.setSelected(type == int(app::gen::BgType::CHECKED_4x4));
+  size2.setSelected(type == int(app::gen::BgType::CHECKED_2x2));
+  centered.setSelected(pref.bg.centered());
+
+  size16.Click.connect(base::Bind<void>(&StatusBar::setCheckedBgSize, this,
+    int(app::gen::BgType::CHECKED_16x16)));
+  size8.Click.connect(base::Bind<void>(&StatusBar::setCheckedBgSize, this,
+    int(app::gen::BgType::CHECKED_8x8)));
+  size4.Click.connect(base::Bind<void>(&StatusBar::setCheckedBgSize, this,
+    int(app::gen::BgType::CHECKED_4x4)));
+  size2.Click.connect(base::Bind<void>(&StatusBar::setCheckedBgSize, this,
+    int(app::gen::BgType::CHECKED_2x2)));
+  centered.Click.connect(
+    base::Bind<void>(&StatusBar::toggleCheckedBgCentered, this));
+
+  menu.addChild(&size16);
+  menu.addChild(&size8);
+  menu.addChild(&size4);
+  menu.addChild(&size2);
+  menu.addChild(new MenuSeparator);
+  menu.addChild(&centered);
+  menu.showPopup(ui::get_mouse_position());
+}
+
+void StatusBar::setCheckedBgSize(int type)
+{
+  if (!m_doc)
+    return;
+  Preferences::instance().document(
+    static_cast<app::Document*>(m_doc)).bg.type(app::gen::BgType(type));
+  if (current_editor)
+    current_editor->updateEditor();
+  updateWorkspaceButtons();
+}
+
+void StatusBar::toggleCheckedBgCentered()
+{
+  if (!m_doc)
+    return;
+  DocumentPreferences& pref = Preferences::instance().document(
+    static_cast<app::Document*>(m_doc));
+  pref.bg.centered(!pref.bg.centered());
+  if (current_editor)
+    current_editor->updateEditor();
+  updateWorkspaceButtons();
+}
+
+void StatusBar::togglePalette()
+{
+  MainWindow* mainWindow = App::instance()->mainWindow();
+  mainWindow->setColorBarVisibility(!mainWindow->getColorBarVisibility());
+  updateWorkspaceButtons();
+}
+
+void StatusBar::toggleTimeline()
+{
+  Command* cmd = CommandsModule::instance()->getCommandByName(CommandId::Timeline);
+  Params params;
+  params.set("switch", "true");
+  UIContext::instance()->executeCommand(cmd, params);
+  updateWorkspaceButtons();
+}
+
+void StatusBar::updateWorkspaceButtons()
+{
+  bool grid = false;
+  bool pixelGrid = false;
+  int checkedBgSize = 16;
+  bool checkedBgCentered = false;
+  if (m_doc) {
+    DocumentPreferences& pref = Preferences::instance().document(
+      static_cast<app::Document*>(m_doc));
+    grid = pref.show.grid();
+    pixelGrid = pref.show.pixelGrid();
+    checkedBgCentered = pref.bg.centered();
+    switch (pref.bg.type()) {
+      case app::gen::BgType::CHECKED_8x8: checkedBgSize = 8; break;
+      case app::gen::BgType::CHECKED_4x4: checkedBgSize = 4; break;
+      case app::gen::BgType::CHECKED_2x2: checkedBgSize = 2; break;
+      default: checkedBgSize = 16; break;
+    }
+  }
+
+  MainWindow* mainWindow = App::instance()->mainWindow();
+  m_gridSettings->setSelected(grid);
+  m_pixelGridToggle->setSelected(pixelGrid);
+  m_checkedBgButton->setTextf("BG%d", checkedBgSize);
+  m_checkedBgButton->setSelected(checkedBgCentered);
+  m_paletteToggle->setSelected(
+    mainWindow && mainWindow->getColorBarVisibility());
+  m_timelineToggle->setSelected(
+    mainWindow && mainWindow->getTimelineVisibility());
+}
+
+void StatusBar::onAfterCommandExecution(CommandExecutionEvent& ev)
+{
+  updateWorkspaceButtons();
 }
 
 void StatusBar::onChangeZoom(const render::Zoom& zoom)

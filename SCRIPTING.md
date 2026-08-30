@@ -1,3 +1,27 @@
+# LibreSprite scripting
+
+LibreSprite provides two automation paths:
+
+- The in-app scripting workspace is a multiline editor for reusable `.js` and
+  `.py` files. Scripts can be opened, saved, and selected from the user script
+  library in the LibreSprite configuration directory.
+- The local MCP server lets an external agent such as Codex or Claude invoke
+  the same drawing operations in a running LibreSprite window.
+
+JavaScript runs directly in LibreSprite. Python uses the bundled
+`from libresprite import app` API and converts requested operations into a
+single UI-thread transaction. A successful run is one Undo step; a generated
+operation error rolls the whole run back.
+
+```python
+from libresprite import app
+
+sprite = app.create_sprite(32, 32, 0)
+image = sprite.ensure_image(0, 0)
+red = app.pixel_color.rgba(255, 0, 0, 255)
+image.fill_rect(8, 8, 16, 16, red)
+```
+
 # [class Sprite]
 ## Properties:
    - `palette`: read-only. Returns the sprite's palette.

@@ -137,7 +137,10 @@ public:
         case tools::FreehandAlgorithm::PIXEL_PERFECT:
           if (m_toolPref.brush.size() == 1) {
             m_intertwine = toolbox->getIntertwinerById(tools::WellKnownIntertwiners::AsPixelPerfect);
-            m_tracePolicy = tools::TracePolicy::AccumulateUpdateLast;
+            // Never restore already-painted pixels while a stroke is in
+            // progress. Pixel-perfect may skip a future corner pixel, but it
+            // must not make pixels that the user already painted disappear.
+            m_tracePolicy = tools::TracePolicy::Accumulate;
             break;
           }
           [[fallthrough]];
@@ -150,6 +153,21 @@ public:
           m_tracePolicy = tools::TracePolicy::Accumulate;
           break;
       }
+    }
+
+    // Snap drawing is cell painting: every visited cell is filled exactly.
+    // Use regular accumulation so pixel-perfect corner cleanup cannot remove
+    // a grid cell that the user already crossed.
+    if (m_docPref.grid.snap() &&
+        m_controller->isFreehand() &&
+        m_ink->isPaint() &&
+        m_pointShape == App::instance()->toolBox()->getPointShapeById(
+                          tools::WellKnownPointShapes::Brush)) {
+      m_pointShape = App::instance()->toolBox()->getPointShapeById(
+        tools::WellKnownPointShapes::GridCell);
+      m_intertwine = App::instance()->toolBox()->getIntertwinerById(
+        tools::WellKnownIntertwiners::AsGridCells);
+      m_tracePolicy = tools::TracePolicy::Accumulate;
     }
 
     // Symmetry mode
@@ -234,6 +252,22 @@ public:
     return false;
   }
   gfx::Rect getGridBounds() override { return m_docPref.grid.bounds(); }
+  gfx::Rect getSnapBounds() override {
+    if (!m_docPref.grid.snapToCheckedBg())
+      return m_docPref.grid.bounds();
+
+    int size = 16;
+    switch (m_docPref.bg.type()) {
+      case app::gen::BgType::CHECKED_8x8: size = 8; break;
+      case app::gen::BgType::CHECKED_4x4: size = 4; break;
+      case app::gen::BgType::CHECKED_2x2: size = 2; break;
+      default: break;
+    }
+    return gfx::Rect(
+      m_docPref.bg.centered() ? m_sprite->width()/2: 0,
+      m_docPref.bg.centered() ? m_sprite->height()/2: 0,
+      size, size);
+  }
   gfx::Point getCelOrigin() override { return m_celOrigin; }
   void setSpeed(const gfx::Point& speed) override { m_speed = speed; }
   gfx::Point getSpeed() override { return m_speed; }

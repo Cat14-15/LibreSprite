@@ -235,6 +235,7 @@
     </section>
     <section id="grid">
       <option id="snap" type="bool" default="false" migrate="Grid.SnapTo" />
+      <option id="snap_to_checked_bg" type="bool" default="true" />
       <option id="bounds" type="gfx::Rect" default="gfx::Rect(0, 0, 16, 16)" migrate="Grid.Bounds" />
       <option id="color" type="app::Color" default="app::Color::fromRgb(0, 0, 255)" migrate="Grid.Color" />
       <option id="opacity" type="int" default="160" migrate="Grid.Opacity" />
@@ -248,6 +249,7 @@
     <section id="bg">
       <option id="type" type="BgType" default="BgType::CHECKED_16x16" migrate="Option.CheckedBgType" />
       <option id="zoom" type="bool" default="true" migrate="Option.CheckedBgZoom" />
+      <option id="centered" type="bool" default="true" />
       <option id="color1" type="app::Color" default="app::Color::fromRgb(128, 128, 128)" migrate="Option.CheckedBgColor1" />
       <option id="color2" type="app::Color" default="app::Color::fromRgb(192, 192, 192)" migrate="Option.CheckedBgColor2" />
     </section>

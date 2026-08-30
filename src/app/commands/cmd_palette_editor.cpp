@@ -23,6 +23,7 @@
 #include "app/ini_file.h"
 #include "app/modules/editors.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/modules/palettes.h"
 #include "app/pref/preferences.h"
 #include "app/transaction.h"
@@ -252,6 +253,7 @@ PaletteEntryEditor::PaletteEntryEditor()
   , m_implantChange(false)
   , m_selfPalChange(false)
 {
+  setI18N();
   m_colorType.addItem("RGB");
   m_colorType.addItem("HSB");
   m_changeMode.addItem("Abs");
@@ -333,16 +335,16 @@ void PaletteEntryEditor::setColor(const app::Color& color)
       break;
 
   if (i == j) {
-    m_entryLabel.setTextf(" Entry: %d", i);
+    m_entryLabel.setTextf(app::i18n(" Entry: %d").c_str(), i);
   }
   else if (j-i+1 == i2-i) {
-    m_entryLabel.setTextf(" Range: %d-%d", i, j);
+    m_entryLabel.setTextf(app::i18n(" Range: %d-%d").c_str(), i, j);
   }
   else if (i == int(entries.size())) {
-    m_entryLabel.setText(" No Entry");
+    m_entryLabel.setText(" " + app::i18n("No Entry"));
   }
   else {
-    m_entryLabel.setText(" Multiple Entries");
+    m_entryLabel.setText(" " + app::i18n("Multiple Entries"));
   }
 
   m_topBox.layout();

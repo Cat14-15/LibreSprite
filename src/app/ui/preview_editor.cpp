@@ -185,6 +185,7 @@ PreviewEditorWindow::PreviewEditorWindow()
   , m_aniSpeed(1.0)
   , m_relatedEditor(nullptr)
 {
+  setI18N();
   setChildSpacing(0);
   setAutoRemap(false);
   setWantFocus(false);

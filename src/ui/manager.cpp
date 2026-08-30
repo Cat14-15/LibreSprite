@@ -252,7 +252,7 @@ void Manager::generateSetCursorMessage(const gfx::Point& mousePos,
   if (get_mouse_cursor() == kOutsideDisplay)
     return;
 
-  Widget* dst = (capture_widget ? capture_widget: mouse_widget);
+  Widget* dst = mouseInputTarget(mousePos);
   if (dst)
     enqueueMessage(
       newMouseMessage(
@@ -455,7 +455,7 @@ void Manager::handleMouseMove(const gfx::Point& mousePos,
   }
 
   // Send the mouse movement message
-  Widget* dst = (capture_widget ? capture_widget: mouse_widget);
+  Widget* dst = mouseInputTarget(mousePos);
   enqueueMessage(
     newMouseMessage(
       kMouseMoveMessage, dst,
@@ -479,7 +479,7 @@ void Manager::handleMouseDown(const gfx::Point& mousePos,
   enqueueMessage(
     newMouseMessage(
       kMouseDownMessage,
-      (capture_widget ? capture_widget: mouse_widget),
+      mouseInputTarget(mousePos),
       mousePos,
       pointerType,
       mouseButtons,
@@ -497,7 +497,7 @@ void Manager::handleMouseUp(const gfx::Point& mousePos,
   enqueueMessage(
     newMouseMessage(
       kMouseUpMessage,
-      (capture_widget ? capture_widget: mouse_widget),
+      mouseInputTarget(mousePos),
       mousePos,
       pointerType,
       mouseButtons,
@@ -512,7 +512,7 @@ void Manager::handleMouseDoubleClick(const gfx::Point& mousePos,
                                      KeyModifiers modifiers,
                                      PointerType pointerType)
 {
-  Widget* dst = (capture_widget ? capture_widget: mouse_widget);
+  Widget* dst = mouseInputTarget(mousePos);
   if (dst) {
     enqueueMessage(
       newMouseMessage(
@@ -531,7 +531,7 @@ void Manager::handleMouseWheel(const gfx::Point& mousePos,
 {
   enqueueMessage(newMouseMessage(
       kMouseWheelMessage,
-      (capture_widget ? capture_widget: mouse_widget),
+      mouseInputTarget(mousePos),
       mousePos, pointerType, mouseButtons, modifiers,
       wheelDelta, preciseWheel));
 }
@@ -540,7 +540,7 @@ void Manager::handleTouchMagnify(const gfx::Point& mousePos,
                                  const KeyModifiers modifiers,
                                  const double magnification)
 {
-  Widget* widget = (capture_widget ? capture_widget: mouse_widget);
+  Widget* widget = mouseInputTarget(mousePos);
   if (widget) {
     Message* msg = new TouchMessage(
       kTouchMagnifyMessage,
@@ -552,6 +552,20 @@ void Manager::handleTouchMagnify(const gfx::Point& mousePos,
 
     enqueueMessage(msg);
   }
+}
+
+Widget* Manager::mouseInputTarget(const gfx::Point& mousePos)
+{
+  // A modal/foreground window owns all pointer input, even outside its
+  // visible bounds. This avoids stale editor hover/capture state sending the
+  // same click to a canvas tool behind settings, save, or exit dialogs.
+  Window* foreground = getForegroundWindow();
+  if (foreground && foreground->isForeground()) {
+    Widget* picked = foreground->pick(mousePos);
+    return (picked ? picked: foreground);
+  }
+
+  return (capture_widget ? capture_widget: mouse_widget);
 }
 
 // Handles Z order: Send the window to top (only when you click in a

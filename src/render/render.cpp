@@ -444,6 +444,7 @@ Render::Render()
   , m_extraImage(NULL)
   , m_bgType(BgType::TRANSPARENT)
   , m_bgCheckedSize(16, 16)
+  , m_bgCheckedCentered(false)
   , m_globalOpacity(255)
   , m_selectedLayer(nullptr)
   , m_selectedFrame(-1)
@@ -476,6 +477,11 @@ void Render::setBgColor2(color_t color)
 void Render::setBgCheckedSize(const gfx::Size& size)
 {
   m_bgCheckedSize = size;
+}
+
+void Render::setBgCheckedCentered(bool state)
+{
+  m_bgCheckedCentered = state;
 }
 
 void Render::setPreviewImage(const Layer* layer,
@@ -757,20 +763,42 @@ void Render::renderBackground(Image* image,
   if (tile_w < 1) tile_w = 1;
   if (tile_h < 1) tile_h = 1;
 
-  // Tile position (u,v) is the number of tile we start in "area.src" coordinate
-  u = (area.src.x / tile_w);
-  v = (area.src.y / tile_h);
+  int origin_x = 0;
+  int origin_y = 0;
+  if (m_bgCheckedCentered && m_sprite) {
+    // Match the symmetry guide exactly.  Applying the zoom after integer
+    // division is important for odd-sized sprites and non-integer zooms.
+    origin_x = zoom.apply(m_sprite->width()/2);
+    origin_y = zoom.apply(m_sprite->height()/2);
+  }
+
+  // Keep a tile boundary on the canvas center, including when a clipped
+  // render starts before that boundary (C++ division truncates negatives).
+  const auto floorDiv = [](int value, int divisor) {
+    int quotient = value/divisor;
+    int remainder = value%divisor;
+    if (remainder < 0)
+      --quotient;
+    return quotient;
+  };
+  const auto positiveMod = [](int value, int divisor) {
+    int remainder = value%divisor;
+    return (remainder < 0 ? remainder+divisor: remainder);
+  };
+
+  u = floorDiv(area.src.x-origin_x, tile_w);
+  v = floorDiv(area.src.y-origin_y, tile_h);
 
   // Position where we start drawing the first tile in "image"
-  int x_start = -(area.src.x % tile_w);
-  int y_start = -(area.src.y % tile_h);
+  int x_start = area.dst.x-positiveMod(area.src.x-origin_x, tile_w);
+  int y_start = area.dst.y-positiveMod(area.src.y-origin_y, tile_h);
 
   gfx::Rect dstBounds = area.dstBounds();
 
   // Draw checked background (tile by tile)
   int u_start = u;
-  for (y=y_start-tile_h; y<image->height()+tile_h; y+=tile_h) {
-    for (x=x_start-tile_w; x<image->width()+tile_w; x+=tile_w) {
+  for (y=y_start; y<dstBounds.y2(); y+=tile_h) {
+    for (x=x_start; x<dstBounds.x2(); x+=tile_w) {
       gfx::Rect fillRc = dstBounds.createIntersection(gfx::Rect(x, y, tile_w, tile_h));
       if (!fillRc.isEmpty())
         fill_rect(

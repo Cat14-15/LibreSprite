@@ -23,6 +23,7 @@
 #include "app/modules/palettes.h"
 #include "app/pref/preferences.h"
 #include "app/resource_finder.h"
+#include "app/script/app_scripting.h"
 #include "app/tools/ink.h"
 #include "app/tools/tool_box.h"
 #include "app/ui/editor/editor.h"
@@ -103,15 +104,27 @@ static bool create_main_display(bool gpuAccel,
   std::string windowLayout;
   load_gui_config(w, h, maximized, windowLayout);
 
-  // Scale is equal to 0 when it's the first time the program is
-  // executed.
+  // Render the display at the monitor's native resolution. The old screen
+  // scale rendered to a smaller surface and enlarged the finished frame,
+  // which made text and icons look low-resolution. Preserve the apparent UI
+  // size of existing installations by migrating that scale to the UI theme.
   int scale = Preferences::instance().general.screenScale();
+  if (scale != 1) {
+    if (scale > 1) {
+      int uiScale = Preferences::instance().experimental.uiScale();
+      uiScale = MID(1, (uiScale < 1 ? 1 : uiScale) * scale, 4);
+      Preferences::instance().experimental.uiScale(uiScale);
+    }
+    scale = 1;
+    Preferences::instance().general.screenScale(scale);
+    Preferences::instance().save();
+  }
   she::instance()->setGpuAcceleration(gpuAccel);
 
   try {
     if (w > 0 && h > 0) {
       main_display = she::instance()->createDisplay(
-        w, h, (scale == 0 ? 1 : MID(1, scale, 4)));
+        w, h, scale);
     }
   }
   catch (const she::DisplayCreationException& e) {
@@ -125,7 +138,7 @@ static bool create_main_display(bool gpuAccel,
           she::instance()->createDisplay(
             try_resolutions[c].width,
             try_resolutions[c].height,
-            (scale == 0 ? try_resolutions[c].scale : scale));
+            scale);
         break;
       }
       catch (const she::DisplayCreationException& e) {
@@ -135,11 +148,6 @@ static bool create_main_display(bool gpuAccel,
   }
 
   if (main_display) {
-    // Change the scale value only in the first run (this will be
-    // saved when the program is closed).
-    if (scale == 0)
-      Preferences::instance().general.screenScale(main_display->scale());
-
     ResourceFinder rf;
     rf.includeDataDir("icons/ase64.png");
     if (rf.findFirst())
@@ -184,6 +192,7 @@ int init_module_gui()
   // Create the default-manager
   manager = new CustomizedGuiManager();
   manager->setDisplay(main_display);
+  AppScripting::initMcpBridge();
 
   setLanguage(Preferences::instance().general.language());
 
@@ -215,6 +224,8 @@ int init_module_gui()
 void exit_module_gui()
 {
   save_gui_config();
+
+  AppScripting::exitMcpBridge();
 
   delete defered_invalid_timer;
   delete manager;
@@ -350,6 +361,17 @@ void defer_invalid_rect(const gfx::Rect& rc)
 // Manager event handler.
 bool CustomizedGuiManager::onProcessMessage(Message* msg)
 {
+  // Ctrl/Shift by themselves are only modifiers. Do not send their down/up
+  // messages to popup windows, because the default UI handler can close or
+  // open menus and floating settings. Modified shortcuts still work when the
+  // non-modifier key arrives.
+  if ((msg->type() == kKeyDownMessage || msg->type() == kKeyUpMessage)) {
+    const auto scancode = static_cast<KeyMessage*>(msg)->scancode();
+    if (scancode == kKeyLControl || scancode == kKeyRControl ||
+        scancode == kKeyLShift || scancode == kKeyRShift)
+      return true;
+  }
+
   switch (msg->type()) {
 
     case kCloseDisplayMessage:
@@ -423,12 +445,13 @@ bool CustomizedGuiManager::onProcessMessage(Message* msg)
 
       for (const Key* key : *KeyboardShortcuts::instance()) {
         if (key->isPressed(msg)) {
-          // Cancel menu-bar loops (to close any popup menu)
-          App::instance()->mainWindow()->getMenuBar()->cancelMenuLoop();
-
           switch (key->type()) {
 
             case KeyType::Tool: {
+              // A real tool shortcut closes an open menu. Modifier-only
+              // action keys (e.g. Ctrl) must not close menus or panels.
+              App::instance()->mainWindow()->getMenuBar()->cancelMenuLoop();
+
               tools::Tool* current_tool = App::instance()->activeTool();
               tools::Tool* select_this_tool = key->tool();
               tools::ToolBox* toolbox = App::instance()->toolBox();
@@ -470,6 +493,8 @@ bool CustomizedGuiManager::onProcessMessage(Message* msg)
             }
 
             case KeyType::Command: {
+              App::instance()->mainWindow()->getMenuBar()->cancelMenuLoop();
+
               Command* command = key->command();
 
               // Commands are executed only when the main window is

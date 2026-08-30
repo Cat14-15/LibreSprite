@@ -20,6 +20,7 @@
 #include "app/commands/params.h"
 #include "app/console.h"
 #include "app/gui_xml.h"
+#include "app/modules/i18n.h"
 #include "app/resource_finder.h"
 #include "app/tools/tool_box.h"
 #include "app/ui/app_menuitem.h"
@@ -216,13 +217,22 @@ Widget* AppMenus::convertXmlelemToMenuitem(tinyxml2::XMLElement* elem)
 Widget* AppMenus::createInvalidVersionMenuitem()
 {
   AppMenuItem* menuitem = new AppMenuItem("WARNING!");
+  menuitem->setI18N();
   Menu* subMenu = new Menu();
-  subMenu->addChild(new AppMenuItem(PACKAGE " is using a customized gui.xml (maybe from your HOME directory)."));
-  subMenu->addChild(new AppMenuItem("You should update your customized gui.xml file to the new version to get"));
-  subMenu->addChild(new AppMenuItem("the latest commands available."));
+  auto addTranslated = [subMenu](const char* text) {
+    auto item = new AppMenuItem(text);
+    item->setI18N();
+    subMenu->addChild(item);
+  };
+  addTranslated(PACKAGE " is using a customized gui.xml (maybe from your HOME directory).");
+  addTranslated("You should update your customized gui.xml file to the new version to get");
+  addTranslated("the latest commands available.");
   subMenu->addChild(new MenuSeparator);
-  subMenu->addChild(new AppMenuItem("You can bypass this validation adding the correct version"));
-  subMenu->addChild(new AppMenuItem("number in <gui version=\"" VERSION "\"> element."));
+  addTranslated("You can bypass this validation adding the correct version");
+  auto versionItem = new AppMenuItem(
+    (app::i18n("Add the correct version number to the gui element: ") +
+     "<gui version=\"" VERSION "\">").c_str());
+  subMenu->addChild(versionItem);
   menuitem->setSubmenu(subMenu);
   return menuitem;
 }

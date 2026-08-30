@@ -16,8 +16,10 @@
 #include "app/console.h"
 #include "app/file/file.h"
 #include "app/ini_file.h"
+#include "app/launcher.h"
 #include "app/modules/gfx.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/recent_files.h"
 #include "app/ui/file_list.h"
 #include "app/ui/file_list_view.h"
@@ -29,6 +31,7 @@
 #include "base/fs.h"
 #include "base/path.h"
 #include "base/split_string.h"
+#include "base/trim_string.h"
 #include "ui/ui.h"
 
 #include "new_folder_window.xml.h"
@@ -157,6 +160,26 @@ private:
   IFileItem* m_fileItem;
 };
 
+class CustomPathEntry : public Entry
+{
+public:
+  CustomPathEntry() : Entry(MAX_PATH, "") { }
+
+  base::Signal1<void, const std::string&> AcceptPath;
+
+protected:
+  bool onProcessMessage(Message* msg) override {
+    if (msg->type() == kKeyDownMessage && hasFocus()) {
+      const auto scancode = static_cast<KeyMessage*>(msg)->scancode();
+      if (scancode == kKeyEnter || scancode == kKeyEnterPad) {
+        AcceptPath(text());
+        return true;
+      }
+    }
+    return Entry::onProcessMessage(msg);
+  }
+};
+
 class CustomFolderNameItem : public ListItem
 {
 public:
@@ -247,10 +270,15 @@ FileSelector::FileSelector(FileSelectorType type, FileSelectorDelegate* delegate
   m_fileName->setFocusMagnet(true);
   fileNamePlaceholder()->addChild(m_fileName);
 
+  m_pathEntry = new CustomPathEntry;
+  m_pathEntry->setExpansive(true);
+  pathEntryPlaceholder()->addChild(m_pathEntry);
+
   goBackButton()->setFocusStop(false);
   goForwardButton()->setFocusStop(false);
   goUpButton()->setFocusStop(false);
   newFolderButton()->setFocusStop(false);
+  openFolderButton()->setFocusStop(false);
 
   goBackButton()->setIconInterface(
     new ButtonIconImpl(theme->parts.comboboxArrowLeft(),
@@ -277,6 +305,7 @@ FileSelector::FileSelector(FileSelectorType type, FileSelectorDelegate* delegate
   setup_mini_look(goForwardButton());
   setup_mini_look(goUpButton());
   setup_mini_look(newFolderButton());
+  setup_mini_look(openFolderButton());
 
   m_fileList = new FileList();
   m_fileList->setId("fileview");
@@ -291,11 +320,16 @@ FileSelector::FileSelector(FileSelectorType type, FileSelectorDelegate* delegate
   goForwardButton()->Click.connect(base::Bind<void>(&FileSelector::onGoForward, this));
   goUpButton()->Click.connect(base::Bind<void>(&FileSelector::onGoUp, this));
   newFolderButton()->Click.connect(base::Bind<void>(&FileSelector::onNewFolder, this));
+  openFolderButton()->Click.connect(
+    base::Bind<void>(&FileSelector::onOpenCurrentFolder, this));
+  m_pathEntry->AcceptPath.connect(&FileSelector::onPathAccepted, this);
   location()->CloseListBox.connect(base::Bind<void>(&FileSelector::onLocationCloseListBox, this));
   fileType()->Change.connect(base::Bind<void>(&FileSelector::onFileTypeChange, this));
   m_fileList->FileSelected.connect(base::Bind<void>(&FileSelector::onFileListFileSelected, this));
   m_fileList->FileAccepted.connect(base::Bind<void>(&FileSelector::onFileListFileAccepted, this));
   m_fileList->CurrentFolderChanged.connect(base::Bind<void>(&FileSelector::onFileListCurrentFolderChanged, this));
+  m_fileList->ContextMenuRequested.connect(
+    base::Bind<void>(&FileSelector::onFileListContextMenu, this));
 
   resizeOptions()->setVisible(withResizeOptions);
   if (withResizeOptions) {
@@ -410,6 +444,7 @@ std::string FileSelector::show(
   // File type for all formats
   {
     ListItem* item = new ListItem("All formats");
+    item->setI18N();
     item->setValue(showExtensions);
     fileType()->addItem(item);
   }
@@ -421,13 +456,14 @@ std::string FileSelector::show(
     if (m_defExtension.empty())
       m_defExtension = tok;
 
-    ListItem* item = new ListItem(tok + " files");
+    ListItem* item = new ListItem(tok + " " + app::i18n("files"));
     item->setValue(tok);
     fileType()->addItem(item);
   }
   // All files
   {
     ListItem* item = new ListItem("All files");
+    item->setI18N();
     item->setValue("");         // Empty extensions means "*.*"
     fileType()->addItem(item);
   }
@@ -746,6 +782,9 @@ void FileSelector::onGoUp()
 void FileSelector::onNewFolder()
 {
   app::gen::NewFolderWindow window;
+  window.name()->setText(app::i18n("New Folder"));
+  window.name()->selectText(0, -1);
+  window.name()->requestFocus();
 
   window.openWindowInForeground();
   if (window.closer() == window.ok()) {
@@ -781,6 +820,77 @@ void FileSelector::onNewFolder()
       }
     }
   }
+}
+
+void FileSelector::onOpenCurrentFolder()
+{
+  if (IFileItem* folder = m_fileList->getCurrentFolder())
+    launcher::open_folder(folder->fileName());
+}
+
+void FileSelector::onPathAccepted(const std::string& value)
+{
+  std::string path = value;
+  base::trim_string(path, path);
+  path = base::fix_path_separators(path);
+  if (path.empty())
+    return;
+
+  IFileItem* item = FileSystemModule::instance()->getFileItemFromPath(path);
+  if (item && !item->isFolder()) {
+    m_fileName->setValue(base::get_file_name(path));
+    item = item->parent();
+  }
+  if (item && item->isFolder() && item->isBrowsable()) {
+    m_fileList->setCurrentFolder(item);
+    manager()->setFocus(m_fileList);
+    return;
+  }
+
+  ui::Alert::show("Problem<<%s||&Close",
+                  app::i18n("Folder not found").c_str());
+  if (IFileItem* folder = m_fileList->getCurrentFolder()) {
+    m_pathEntry->setText(folder->fileName());
+    m_pathEntry->selectAllText();
+  }
+}
+
+void FileSelector::onRefreshFileList()
+{
+  IFileItem* currentFolder = m_fileList->getCurrentFolder();
+  if (!currentFolder)
+    return;
+
+  FileSystemModule::instance()->refresh();
+  m_navigationLocked = true;
+  m_fileList->setCurrentFolder(currentFolder);
+  m_navigationLocked = false;
+}
+
+void FileSelector::onFileListContextMenu()
+{
+  Menu menu;
+  MenuItem openFolder(app::i18n("Open Folder"));
+  MenuItem newFolder(app::i18n("New Folder"));
+  MenuItem goUp(app::i18n("Go Up"));
+  MenuItem refresh(app::i18n("Refresh"));
+
+  IFileItem* selected = m_fileList->getSelectedFileItem();
+  IFileItem* currentFolder = m_fileList->getCurrentFolder();
+  openFolder.setEnabled(selected && selected->isBrowsable());
+  goUp.setEnabled(currentFolder && currentFolder->parent());
+
+  openFolder.Click.connect(base::Bind<void>(&FileSelector::goInsideFolder, this));
+  newFolder.Click.connect(base::Bind<void>(&FileSelector::onNewFolder, this));
+  goUp.Click.connect(base::Bind<void>(&FileSelector::onGoUp, this));
+  refresh.Click.connect(base::Bind<void>(&FileSelector::onRefreshFileList, this));
+
+  menu.addChild(&openFolder);
+  menu.addChild(new MenuSeparator);
+  menu.addChild(&newFolder);
+  menu.addChild(&goUp);
+  menu.addChild(&refresh);
+  menu.showPopup(ui::get_mouse_position());
 }
 
 // Hook for the 'location' combo-box
@@ -841,7 +951,7 @@ void FileSelector::onFileListFileSelected()
 {
   IFileItem* fileitem = m_fileList->getSelectedFileItem();
 
-  if (!fileitem->isFolder()) {
+  if (fileitem && !fileitem->isFolder()) {
     std::string filename = base::get_file_name(fileitem->fileName());
 
     m_fileName->setValue(filename.c_str());
@@ -859,6 +969,10 @@ void FileSelector::onFileListCurrentFolderChanged()
     addInNavigationHistory(m_fileList->getCurrentFolder());
 
   updateLocation();
+  if (IFileItem* folder = m_fileList->getCurrentFolder()) {
+    m_pathEntry->setText(folder->fileName());
+    m_pathEntry->deselectText();
+  }
   updateNavigationButtons();
 
   // Close the autocomplete popup just in case it's open.

@@ -18,6 +18,7 @@
 #include "app/console.h"
 #include "app/context_access.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/transaction.h"
 #include "app/ui/timeline.h"
 #include "app/ui/user_data_popup.h"
@@ -264,7 +265,7 @@ private:
       m_userData = m_layer->userData();
     }
     else {
-      name()->setText("No Layer");
+      name()->setText(app::i18n("No Layer"));
       name()->setEnabled(false);
       mode()->setEnabled(false);
       opacity()->setEnabled(false);

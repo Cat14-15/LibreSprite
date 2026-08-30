@@ -40,6 +40,7 @@ FilterWindow::FilterWindow(const char* title, const char* cfgSection,
   , m_showPreview("&Preview")
   , m_tiledCheck(withTiled == WithTiledCheckBox ? new CheckBox("&Tiled") : NULL)
 {
+  setI18N();
   m_targetButton.setTarget(filterMgr->getTarget());
   m_targetButton.TargetChange.connect(&FilterWindow::onTargetButtonChange, this);
   m_okButton.Click.connect(&FilterWindow::onOk, this);

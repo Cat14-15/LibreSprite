@@ -33,6 +33,36 @@ using namespace gfx;
 using namespace doc;
 using namespace filters;
 
+namespace {
+
+int floorDiv(int value, int divisor)
+{
+  int quotient = value/divisor;
+  if (value%divisor < 0)
+    --quotient;
+  return quotient;
+}
+
+Point pointInsideSnapCell(ToolLoop* loop,
+                          const Rect& bounds,
+                          int cellX,
+                          int cellY)
+{
+  Point point(bounds.x+cellX*bounds.w+bounds.w/2,
+              bounds.y+cellY*bounds.h+bounds.h/2);
+
+  // Center-aligned grids can leave a partial cell at a canvas edge whose
+  // mathematical center is outside the sprite. Keep the representative point
+  // inside the canvas so the editor never rejects that partial cell.
+  if (Sprite* sprite = loop->sprite()) {
+    point.x = MID(0, point.x, sprite->width()-1);
+    point.y = MID(0, point.y, sprite->height()-1);
+  }
+  return point;
+}
+
+} // anonymous namespace
+
 ToolLoopManager::ToolLoopManager(ToolLoop* toolLoop)
   : m_toolLoop(toolLoop)
   , m_dirtyArea(toolLoop->getDirtyArea())
@@ -108,6 +138,12 @@ bool ToolLoopManager::releaseButton(const Pointer& pointer)
   Point spritePoint = pointer.point();
   snapToGrid(spritePoint);
 
+  // A release can arrive after the last mouse-move event. Complete every
+  // crossed snap cell before ending the stroke so a quick flick has no gap.
+  appendSnappedFreehandCells(
+    spritePoint,
+    (m_stroke.empty() ? pointer.pressure(): m_stroke.lastPoint().pressure));
+
   bool res = m_toolLoop->getController()->releaseButton(m_stroke, spritePoint);
 
   if (!res && (m_toolLoop->getInk()->isSelection() || m_toolLoop->getFilled())) {
@@ -133,13 +169,89 @@ void ToolLoopManager::movement(const Pointer& pointer)
   m_oldPoint = spritePoint;
   snapToGrid(spritePoint);
 
-  m_toolLoop->getController()->movement(m_toolLoop, m_stroke, spritePoint, pointer.pressure());
+  if (!appendSnappedFreehandCells(spritePoint, pointer.pressure())) {
+    m_toolLoop->getController()->movement(
+      m_toolLoop, m_stroke, spritePoint, pointer.pressure());
+    doLoopStep(false);
+  }
 
   std::string statusText;
   m_toolLoop->getController()->getStatusBarText(m_stroke, statusText);
   m_toolLoop->updateStatusBar(statusText.c_str());
 
-  doLoopStep(false);
+}
+
+bool ToolLoopManager::appendSnappedFreehandCells(const Point& point,
+                                                 float pressure)
+{
+  if (!m_toolLoop->getSnapToGrid() ||
+      !m_toolLoop->getController()->canSnapToGrid() ||
+      !m_toolLoop->getController()->isFreehand() ||
+      !m_toolLoop->getPointShape()->isGridCell() ||
+      m_stroke.empty())
+    return false;
+
+  const Rect bounds = m_toolLoop->getSnapBounds();
+  if (bounds.w <= 0 || bounds.h <= 0)
+    return false;
+
+  const auto& last = m_stroke.lastPoint();
+  const Point from(floorDiv(last.x-bounds.x, bounds.w),
+                   floorDiv(last.y-bounds.y, bounds.h));
+  const Point to(floorDiv(point.x-bounds.x, bounds.w),
+                 floorDiv(point.y-bounds.y, bounds.h));
+
+  const auto appendCell = [&](int x, int y) {
+    const Point cell = pointInsideSnapCell(m_toolLoop, bounds, x, y);
+    m_toolLoop->getController()->movement(
+      m_toolLoop, m_stroke, cell, pressure);
+    doLoopStep(false);
+  };
+
+  // Visit every grid cell touched by the continuous segment. A regular
+  // Bresenham line chooses only one side when the pointer crosses a cell
+  // corner, which leaves visible holes during quick diagonal strokes.
+  int x = from.x;
+  int y = from.y;
+  const int dx = ABS(to.x-from.x);
+  const int dy = ABS(to.y-from.y);
+  const int sx = SGN(to.x-from.x);
+  const int sy = SGN(to.y-from.y);
+  int ix = 0;
+  int iy = 0;
+
+  while (ix < dx || iy < dy) {
+    const long long decision =
+      static_cast<long long>(1+2*ix)*dy-
+      static_cast<long long>(1+2*iy)*dx;
+
+    if (decision == 0) {
+      const int nextX = x+sx;
+      const int nextY = y+sy;
+      // The segment touches both side cells at an exact corner. Paint both,
+      // then the diagonal destination, so no crossed checker cell is omitted.
+      if (ix < dx)
+        appendCell(nextX, y);
+      if (iy < dy)
+        appendCell(x, nextY);
+      x = nextX;
+      y = nextY;
+      ++ix;
+      ++iy;
+      appendCell(x, y);
+    }
+    else if (decision < 0) {
+      x += sx;
+      ++ix;
+      appendCell(x, y);
+    }
+    else {
+      y += sy;
+      ++iy;
+      appendCell(x, y);
+    }
+  }
+  return true;
 }
 
 void ToolLoopManager::doLoopStep(bool last_step)
@@ -211,8 +323,25 @@ void ToolLoopManager::snapToGrid(Point& point)
       !m_toolLoop->getSnapToGrid())
     return;
 
-  point = snap_to_grid(m_toolLoop->getGridBounds(), point,
-                       PreferSnapTo::ClosestGridVertex);
+  const gfx::Rect bounds = m_toolLoop->getSnapBounds();
+  if (bounds.w <= 0 || bounds.h <= 0)
+    return;
+
+  if (!m_toolLoop->getPointShape()->isGridCell()) {
+    gfx::Rect vertices = bounds;
+    vertices.x += vertices.w/2;
+    vertices.y += vertices.h/2;
+    point = snap_to_grid(vertices, point,
+                         PreferSnapTo::ClosestGridVertex);
+    return;
+  }
+
+  // Select the cell from the actual pointer position. For a partial edge
+  // cell, its mathematical center can be outside the canvas, so use an
+  // equivalent point clamped inside that same cell.
+  const int cellX = floorDiv(point.x-bounds.x, bounds.w);
+  const int cellY = floorDiv(point.y-bounds.y, bounds.h);
+  point = pointInsideSnapCell(m_toolLoop, bounds, cellX, cellY);
 }
 
 // Strokes are relative to sprite origin.

@@ -24,3 +24,7 @@ build
 /.cache/
 *~
 /android/
+
+# Python scripting/MCP caches
+__pycache__/
+*.py[cod]

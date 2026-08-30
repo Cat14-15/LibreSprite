@@ -145,6 +145,7 @@ namespace ui {
     void handleTouchMagnify(const gfx::Point& mousePos,
                             const KeyModifiers modifiers,
                             const double magnification);
+    Widget* mouseInputTarget(const gfx::Point& mousePos);
     void handleWindowZOrder();
 
     void pumpQueue();

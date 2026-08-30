@@ -395,6 +395,7 @@ add_library(app-lib
   ui/configure_timeline_popup.cpp
   ui/context_bar.cpp
   ui/devconsole_view.cpp
+  ui/script_editor.cpp
   ui/document_view.cpp
   ui/drop_down_button.cpp
   ui/editor/brush_preview.cpp

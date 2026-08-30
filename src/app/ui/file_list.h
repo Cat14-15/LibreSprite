@@ -42,6 +42,7 @@ namespace app {
     base::Signal0<void> FileSelected;
     base::Signal0<void> FileAccepted;
     base::Signal0<void> CurrentFolderChanged;
+    base::Signal0<void> ContextMenuRequested;
 
   protected:
     virtual bool onProcessMessage(ui::Message* msg) override;

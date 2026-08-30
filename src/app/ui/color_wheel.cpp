@@ -326,6 +326,15 @@ void ColorWheel::onOptions()
   MenuItem triadic("Triadic");
   MenuItem tetradic("Tetradic");
   MenuItem square("Square");
+  discrete.setI18N();
+  none.setI18N();
+  complementary.setI18N();
+  monochromatic.setI18N();
+  analogous.setI18N();
+  split.setI18N();
+  triadic.setI18N();
+  tetradic.setI18N();
+  square.setI18N();
   menu.addChild(&discrete);
   menu.addChild(new MenuSeparator);
   menu.addChild(&none);

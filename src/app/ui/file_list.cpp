@@ -120,6 +120,8 @@ bool FileList::onProcessMessage(Message* msg)
     case kMouseMoveMessage:
       if (hasCapture()) {
         MouseMessage* mouseMsg = static_cast<MouseMessage*>(msg);
+        const bool contextClick =
+          (msg->type() == kMouseDownMessage && mouseMsg->right());
         int th = textHeight();
         int y = bounds().y;
         IFileItem* old_selected = m_selected;
@@ -134,8 +136,8 @@ bool FileList::onProcessMessage(Message* msg)
 
           if (((mouseMsg->position().y >= y) &&
                (mouseMsg->position().y < y+th+4*guiscale())) ||
-              (it == m_list.begin() && mouseMsg->position().y < y) ||
-              (it == m_list.end()-1 && mouseMsg->position().y >= y+th+4*guiscale())) {
+              (!contextClick && it == m_list.begin() && mouseMsg->position().y < y) ||
+              (!contextClick && it == m_list.end()-1 && mouseMsg->position().y >= y+th+4*guiscale())) {
             m_selected = fi;
             makeSelectedFileitemVisible();
             break;
@@ -151,6 +153,13 @@ bool FileList::onProcessMessage(Message* msg)
 
           // Emit "FileSelected" event.
           onFileSelected();
+        }
+
+        if (contextClick) {
+          if (hasCapture())
+            releaseMouse();
+          ContextMenuRequested();
+          return true;
         }
       }
       break;

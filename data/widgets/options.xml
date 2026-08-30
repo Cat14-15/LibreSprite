@@ -38,13 +38,6 @@
                 <listitem text="Russian" value="ru" />
                 <listitem text="Spanish" value="es" />
               </combobox>
-              <label text="Screen Scaling:" />
-              <combobox id="screen_scale">
-                <listitem text="100%" value="1" />
-                <listitem text="200%" value="2" />
-                <listitem text="300%" value="3" />
-                <listitem text="400%" value="4" />
-              </combobox>
               <label text="UI Elements Scaling:" />
               <combobox id="ui_scale">
                 <listitem text="100%" value="1" />
@@ -59,6 +52,8 @@
           <hbox>
             <check text="Automatically save recovery data every" id="enable_data_recovery" tooltip="With this option you can recover your documents&#10;if the program finalizes unexpectedly." />
             <combobox id="data_recovery_period">
+              <listitem text="30 Seconds" value="0" />
+              <listitem text="1 Minute" value="1" />
               <listitem text="2 Minutes" value="2" />
               <listitem text="5 Minutes" value="5" />
               <listitem text="10 Minutes" value="10" />
@@ -149,6 +144,7 @@
             <combobox id="checked_bg_size" expansive="true" />
           </hbox>
           <check text="Apply Zoom" id="checked_bg_zoom" />
+          <check text="Center Checks on Canvas" id="checked_bg_centered" />
           <hbox>
             <label text="Colors:" />
             <box horizontal="true" id="checked_bg_color1_box" />

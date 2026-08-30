@@ -32,6 +32,7 @@ namespace app {
     Option<int>& m_symmetryAxisPos;
     int m_symmetryAxisStart;
     gfx::Point m_mouseStart;
+    bool m_centered;
   };
 
 } // namespace app

@@ -20,6 +20,7 @@
 #include "app/ini_file.h"
 #include "app/modules/gfx.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/modules/palettes.h"
 #include "app/tools/active_tool.h"
 #include "app/tools/controller.h"
@@ -52,6 +53,7 @@
 #include "ui/message.h"
 #include "ui/paint_event.h"
 #include "ui/popup_window.h"
+#include "ui/separator.h"
 #include "ui/size_hint_event.h"
 #include "ui/system.h"
 #include "ui/theme.h"
@@ -163,7 +165,11 @@ private:
     base::ScopedValue<bool> lockFlag(g_updatingFromCode, true, g_updatingFromCode);
 
     Tool* tool = App::instance()->activeTool();
-    Preferences::instance().tool(tool).brush.size(getValue());
+    auto& pref = Preferences::instance().tool(tool);
+    pref.brush.size(getValue());
+    if (getValue() != 1 &&
+        pref.freehandAlgorithm() == tools::FreehandAlgorithm::PIXEL_PERFECT)
+      pref.freehandAlgorithm(tools::FreehandAlgorithm::DEFAULT);
   }
 };
 
@@ -396,7 +402,7 @@ class ContextBar::InkShadesField : public HBox {
       , m_hotIndex(-1)
       , m_dragIndex(-1)
       , m_boxSize(12) {
-      setText("Select colors in the palette");
+      setText(app::i18n("Select colors in the palette"));
     }
 
     void reverseShadeColors() {
@@ -1122,13 +1128,76 @@ protected:
     CheckBox::onClick(ev);
 
     Tool* tool = App::instance()->activeTool();
-    Preferences::instance().tool(tool).freehandAlgorithm(
+    auto& toolPref = Preferences::instance().tool(tool);
+    if (isSelected())
+      toolPref.brush.size(1);
+    toolPref.freehandAlgorithm(
       isSelected() ?
         tools::FreehandAlgorithm::PIXEL_PERFECT:
         tools::FreehandAlgorithm::DEFAULT);
 
     releaseFocus();
+    App::instance()->contextBar()->updateForActiveTool();
   }
+};
+
+class ContextBar::SnapField : public HBox {
+public:
+  SnapField()
+    : m_updating(false)
+    , m_enabled("Snap") {
+    m_source.addItem("Checked Background");
+    m_source.addItem("Project Grid");
+    setup_mini_font(&m_enabled);
+    addChild(&m_enabled);
+    addChild(&m_source);
+
+    m_enabled.Click.connect([this](Event&){
+      if (m_updating)
+        return;
+      if (Document* doc = UIContext::instance()->activeDocument())
+      {
+        auto& pref = Preferences::instance().document(doc);
+        pref.grid.snap(m_enabled.isSelected());
+        if (m_enabled.isSelected() && pref.grid.snapToCheckedBg())
+          pref.bg.zoom(true);
+      }
+    });
+    m_source.Change.connect([this]{
+      if (m_updating)
+        return;
+      if (Document* doc = UIContext::instance()->activeDocument()) {
+        auto& pref = Preferences::instance().document(doc);
+        const bool checkedBg = (m_source.getSelectedItemIndex() == 0);
+        pref.grid.snapToCheckedBg(checkedBg);
+        if (checkedBg)
+          pref.bg.zoom(true);
+      }
+    });
+  }
+
+  void updateFromDocument() {
+    base::ScopedValue<bool> lock(m_updating, true, m_updating);
+    Document* doc = UIContext::instance()->activeDocument();
+    setEnabled(doc != nullptr);
+    if (!doc)
+      return;
+    auto& pref = Preferences::instance().document(doc);
+    m_enabled.setSelected(pref.grid.snap());
+    m_source.setSelectedItemIndex(pref.grid.snapToCheckedBg() ? 0: 1);
+  }
+
+  void setupTooltips(TooltipManager* tooltipManager) {
+    tooltipManager->addTooltipFor(
+      &m_enabled, "Enable drawing snap", BOTTOM);
+    tooltipManager->addTooltipFor(
+      &m_source, "Choose checked background or project grid as the snap source", BOTTOM);
+  }
+
+private:
+  bool m_updating;
+  CheckBox m_enabled;
+  ComboBox m_source;
 };
 
 class ContextBar::SelectionModeField : public ButtonSet
@@ -1317,6 +1386,213 @@ private:
   }
 };
 
+// Compact, explicitly tool-bound options for a different tool assigned to
+// the right mouse button.  Shared/global options stay in the main group, so
+// identical controls are not duplicated.
+class ContextBar::SecondaryToolOptions : public HBox {
+public:
+  SecondaryToolOptions()
+    : m_tool(nullptr)
+    , m_updating(false)
+    , m_toolLabel(new Label(""))
+    , m_sizeLabel(new Label("Size:"))
+    , m_size(new IntEntry(Brush::kMinBrushSize, Brush::kMaxBrushSize))
+    , m_angleLabel(new Label("Angle:"))
+    , m_angle(new IntEntry(0, 180))
+    , m_inkLabel(new Label("Ink:"))
+    , m_ink(new ComboBox)
+    , m_opacityLabel(new Label("Opacity:"))
+    , m_opacity(new IntEntry(0, 255))
+    , m_pixelPerfect(new CheckBox("Pixel-perfect"))
+    , m_toleranceLabel(new Label("Tolerance:"))
+    , m_tolerance(new IntEntry(0, 255))
+    , m_contiguous(new CheckBox("Contiguous"))
+    , m_sprayWidthLabel(new Label("Width:"))
+    , m_sprayWidth(new IntEntry(1, 32))
+    , m_spraySpeedLabel(new Label("Speed:"))
+    , m_spraySpeed(new IntEntry(1, 100)) {
+    for (Label* label : { m_sizeLabel, m_angleLabel, m_inkLabel,
+                         m_opacityLabel, m_toleranceLabel,
+                         m_sprayWidthLabel, m_spraySpeedLabel }) {
+      label->setI18N();
+      setup_mini_font(label);
+    }
+    setup_mini_font(m_toolLabel);
+    setup_mini_font(m_pixelPerfect);
+    setup_mini_font(m_contiguous);
+    m_size->setSuffix("px");
+    m_angle->setSuffix("\xc2\xb0");
+
+    m_ink->addItem("Simple Ink");
+    m_ink->addItem("Alpha Compositing");
+    m_ink->addItem("Copy Color");
+    m_ink->addItem("Lock Alpha");
+    m_ink->addItem("Shading");
+
+    addChild(m_toolLabel);
+    addChild(m_sizeLabel); addChild(m_size);
+    addChild(m_angleLabel); addChild(m_angle);
+    addChild(m_inkLabel); addChild(m_ink);
+    addChild(m_opacityLabel); addChild(m_opacity);
+    addChild(m_pixelPerfect);
+    addChild(m_toleranceLabel); addChild(m_tolerance);
+    addChild(m_contiguous);
+    addChild(m_sprayWidthLabel); addChild(m_sprayWidth);
+    addChild(m_spraySpeedLabel); addChild(m_spraySpeed);
+
+    m_size->Change.connect([this]{
+      if (!m_updating && m_tool) {
+        auto& pref = Preferences::instance().tool(m_tool);
+        pref.brush.size(m_size->getValue());
+        if (m_size->getValue() != 1 &&
+            pref.freehandAlgorithm() == tools::FreehandAlgorithm::PIXEL_PERFECT)
+          pref.freehandAlgorithm(tools::FreehandAlgorithm::DEFAULT);
+        updateForTool(m_tool);
+        parent()->layout();
+      }
+    });
+    m_angle->Change.connect([this]{
+      if (!m_updating && m_tool)
+        Preferences::instance().tool(m_tool).brush.angle(m_angle->getValue());
+    });
+    m_ink->Change.connect([this]{
+      if (!m_updating && m_tool) {
+        Preferences::instance().tool(m_tool).ink(
+          static_cast<InkType>(m_ink->getSelectedItemIndex()));
+        updateForTool(m_tool);
+        parent()->layout();
+      }
+    });
+    m_opacity->Change.connect([this]{
+      if (!m_updating && m_tool)
+        Preferences::instance().tool(m_tool).opacity(m_opacity->getValue());
+    });
+    m_pixelPerfect->Click.connect([this](Event&){
+      if (!m_updating && m_tool) {
+        auto& pref = Preferences::instance().tool(m_tool);
+        if (m_pixelPerfect->isSelected()) {
+          pref.brush.size(1);
+          m_size->setValue(1);
+        }
+        pref.freehandAlgorithm(
+          m_pixelPerfect->isSelected() ?
+            tools::FreehandAlgorithm::PIXEL_PERFECT:
+            tools::FreehandAlgorithm::DEFAULT);
+        updateForTool(m_tool);
+        parent()->layout();
+      }
+    });
+    m_tolerance->Change.connect([this]{
+      if (!m_updating && m_tool)
+        Preferences::instance().tool(m_tool).tolerance(m_tolerance->getValue());
+    });
+    m_contiguous->Click.connect([this](Event&){
+      if (!m_updating && m_tool)
+        Preferences::instance().tool(m_tool).contiguous(m_contiguous->isSelected());
+    });
+    m_sprayWidth->Change.connect([this]{
+      if (!m_updating && m_tool)
+        Preferences::instance().tool(m_tool).spray.width(m_sprayWidth->getValue());
+    });
+    m_spraySpeed->Change.connect([this]{
+      if (!m_updating && m_tool)
+        Preferences::instance().tool(m_tool).spray.speed(m_spraySpeed->getValue());
+    });
+  }
+
+  void updateForTool(Tool* tool) {
+    m_tool = tool;
+    setVisible(tool != nullptr);
+    if (!tool)
+      return;
+
+    base::ScopedValue<bool> lock(m_updating, true, m_updating);
+    auto& pref = Preferences::instance().tool(tool);
+    if (pref.freehandAlgorithm() == tools::FreehandAlgorithm::PIXEL_PERFECT &&
+        pref.brush.size() != 1)
+      pref.freehandAlgorithm(tools::FreehandAlgorithm::DEFAULT);
+
+    m_toolLabel->setText(app::i18n("Right:") + " " + app::i18n(tool->getText()));
+    m_size->setValue(pref.brush.size());
+    m_angle->setValue(pref.brush.angle());
+    m_ink->setSelectedItemIndex(int(pref.ink()));
+    m_opacity->setValue(pref.opacity());
+    m_pixelPerfect->setSelected(
+      pref.freehandAlgorithm() == tools::FreehandAlgorithm::PIXEL_PERFECT);
+    m_tolerance->setValue(pref.tolerance());
+    m_contiguous->setSelected(pref.contiguous());
+    m_sprayWidth->setValue(pref.spray.width());
+    m_spraySpeed->setValue(pref.spray.speed());
+
+    const bool isPaint =
+      tool->getInk(0)->isPaint() || tool->getInk(1)->isPaint();
+    const bool isEffect =
+      tool->getInk(0)->isEffect() || tool->getInk(1)->isEffect();
+    const bool supportsBrush = isPaint || isEffect;
+    const bool showOpacity =
+      (isPaint && tools::inkHasOpacity(pref.ink())) || isEffect;
+    const bool hasInk =
+      (tool->getInk(0)->isPaint() && !tool->getInk(0)->isEffect()) ||
+      (tool->getInk(1)->isPaint() && !tool->getInk(1)->isEffect());
+    const bool isFloodFill =
+      tool->getPointShape(0)->isFloodFill() ||
+      tool->getPointShape(1)->isFloodFill();
+    const bool isSpray =
+      tool->getPointShape(0)->isSpray() ||
+      tool->getPointShape(1)->isSpray();
+    const bool isFreehand =
+      tool->getController(0)->isFreehand() ||
+      tool->getController(1)->isFreehand();
+    const bool hasAngle =
+      pref.brush.size() > 1 &&
+      (pref.brush.type() == app::gen::BrushType::SQUARE ||
+       pref.brush.type() == app::gen::BrushType::LINE);
+
+    showPair(m_sizeLabel, m_size, supportsBrush && !isFloodFill);
+    showPair(m_angleLabel, m_angle, supportsBrush && !isFloodFill && hasAngle);
+    showPair(m_inkLabel, m_ink, hasInk);
+    showPair(m_opacityLabel, m_opacity, showOpacity);
+    m_pixelPerfect->setVisible(isFreehand && supportsBrush);
+    showPair(m_toleranceLabel, m_tolerance, isFloodFill);
+    m_contiguous->setVisible(isFloodFill);
+    showPair(m_sprayWidthLabel, m_sprayWidth, isSpray);
+    showPair(m_spraySpeedLabel, m_spraySpeed, isSpray);
+  }
+
+  void setupTooltips(TooltipManager* tooltipManager) {
+    tooltipManager->addTooltipFor(
+      m_pixelPerfect,
+      "Pixel-perfect removes doubled corner pixels from freehand strokes; it does not snap to a grid",
+      BOTTOM);
+  }
+
+private:
+  static void showPair(Widget* label, Widget* field, bool visible) {
+    label->setVisible(visible);
+    field->setVisible(visible);
+  }
+
+  Tool* m_tool;
+  bool m_updating;
+  Label* m_toolLabel;
+  Label* m_sizeLabel;
+  IntEntry* m_size;
+  Label* m_angleLabel;
+  IntEntry* m_angle;
+  Label* m_inkLabel;
+  ComboBox* m_ink;
+  Label* m_opacityLabel;
+  IntEntry* m_opacity;
+  CheckBox* m_pixelPerfect;
+  Label* m_toleranceLabel;
+  IntEntry* m_tolerance;
+  CheckBox* m_contiguous;
+  Label* m_sprayWidthLabel;
+  IntEntry* m_sprayWidth;
+  Label* m_spraySpeedLabel;
+  IntEntry* m_spraySpeed;
+};
+
 ContextBar::ContextBar()
   : Box(HORIZONTAL)
 {
@@ -1326,6 +1602,9 @@ ContextBar::ContextBar()
 
   SkinTheme* theme = static_cast<SkinTheme*>(this->theme());
   setBgColor(theme->colors.workspace());
+
+  addChild(m_leftToolLabel = new Label(""));
+  setup_mini_font(m_leftToolLabel);
 
   addChild(m_selectionOptionsBox = new HBox());
   m_selectionOptionsBox->addChild(m_dropPixels = new DropPixelsField());
@@ -1340,12 +1619,14 @@ ContextBar::ContextBar()
   addChild(m_brushPatternField = new BrushPatternField());
 
   addChild(m_toleranceLabel = new Label("Tolerance:"));
+  m_toleranceLabel->setI18N();
   addChild(m_tolerance = new ToleranceField());
   addChild(m_contiguous = new ContiguousField());
   addChild(m_paintBucketSettings = new PaintBucketSettingsField());
 
   addChild(m_inkType = new InkTypeField(this));
   addChild(m_inkOpacityLabel = new Label("Opacity:"));
+  m_inkOpacityLabel->setI18N();
   addChild(m_inkOpacity = new InkOpacityField());
   addChild(m_inkShades = new InkShadesField());
 
@@ -1359,6 +1640,7 @@ ContextBar::ContextBar()
 
   addChild(m_sprayBox = new HBox());
   m_sprayBox->addChild(m_sprayLabel = new Label("Spray:"));
+  m_sprayLabel->setI18N();
   m_sprayBox->addChild(m_sprayWidth = new SprayWidthField());
   m_sprayBox->addChild(m_spraySpeed = new SpraySpeedField());
 
@@ -1369,15 +1651,23 @@ ContextBar::ContextBar()
   addChild(m_freehandBox = new HBox());
 #if 0                           // TODO for v1.1
   m_freehandBox->addChild(m_freehandLabel = new Label("Freehand:"));
+  m_freehandLabel->setI18N();
   setup_mini_font(m_freehandLabel);
 #endif
   m_freehandBox->addChild(m_freehandAlgo = new FreehandAlgorithmField());
+  m_freehandBox->addChild(m_snapField = new SnapField());
 
   setup_mini_font(m_toleranceLabel);
   setup_mini_font(m_inkOpacityLabel);
 
   addChild(m_symmetry = new SymmetryField());
   m_symmetry->setVisible(Preferences::instance().symmetryMode.enabled());
+
+  addChild(m_secondarySeparator = new Separator("", VERTICAL));
+  addChild(m_secondaryOptions = new SecondaryToolOptions());
+  m_leftToolLabel->setVisible(false);
+  m_secondarySeparator->setVisible(false);
+  m_secondaryOptions->setVisible(false);
 
   TooltipManager* tooltipManager = new TooltipManager();
   addChild(tooltipManager);
@@ -1393,14 +1683,19 @@ ContextBar::ContextBar()
   tooltipManager->addTooltipFor(m_pivot, "Rotation Pivot", BOTTOM);
   tooltipManager->addTooltipFor(m_transparentColor, "Transparent Color", BOTTOM);
   tooltipManager->addTooltipFor(m_rotAlgo, "Rotation Algorithm", BOTTOM);
-  tooltipManager->addTooltipFor(m_freehandAlgo, "Freehand trace algorithm", BOTTOM);
+  tooltipManager->addTooltipFor(
+    m_freehandAlgo,
+    "Pixel-perfect removes doubled corner pixels from freehand strokes; it does not snap to a grid",
+    BOTTOM);
   tooltipManager->addTooltipFor(m_paintBucketSettings, "Extra paint bucket options", BOTTOM);
 
   m_brushType->setupTooltips(tooltipManager);
   m_selectionMode->setupTooltips(tooltipManager);
   m_dropPixels->setupTooltips(tooltipManager);
   m_freehandAlgo->setupTooltips(tooltipManager);
+  m_snapField->setupTooltips(tooltipManager);
   m_symmetry->setupTooltips(tooltipManager);
+  m_secondaryOptions->setupTooltips(tooltipManager);
 
   App::instance()->activeToolManager()->addObserver(this);
 
@@ -1460,11 +1755,21 @@ void ContextBar::onBrushAngleChange()
 
 void ContextBar::onActiveToolChange(tools::Tool* tool)
 {
-  if (m_activeBrush->type() != kImageBrushType)
-    setActiveBrush(ContextBar::createBrushFromPreferences());
-  else {
-    updateForTool(tool);
+  ActiveToolManager* manager = App::instance()->activeToolManager();
+  Tool* displayTool =
+    (tool == manager->rightClickAssignedTool() ? manager->selectedTool(): tool);
+
+  if (m_activeBrush->type() != kImageBrushType) {
+    m_activeBrush = ContextBar::createBrushFromPreferences(
+      &Preferences::instance().tool(displayTool).brush);
+    BrushChange();
   }
+  updateForTool(displayTool);
+}
+
+void ContextBar::onRightClickToolChange(tools::Tool*)
+{
+  updateForTool(App::instance()->activeToolManager()->selectedTool());
 }
 
 void ContextBar::onSymmetryModeChange()
@@ -1520,6 +1825,14 @@ void ContextBar::updateForTool(tools::Tool* tool)
   if (tool) {
     toolPref = &preferences.tool(tool);
     brushPref = &toolPref->brush;
+
+    // Pixel-perfect is defined for a one-pixel freehand brush. Old saved
+    // preferences could keep it selected with a larger brush, making the
+    // checkbox appear enabled while producing no useful difference.
+    if (toolPref->freehandAlgorithm() ==
+          tools::FreehandAlgorithm::PIXEL_PERFECT &&
+        brushPref->size() != 1)
+      toolPref->freehandAlgorithm(tools::FreehandAlgorithm::DEFAULT);
   }
 
   if (toolPref) {
@@ -1643,7 +1956,9 @@ void ContextBar::updateForTool(tools::Tool* tool)
   m_inkShades->setVisible(hasInkShades);
   m_eyedropperField->setVisible(isEyedropper);
   m_autoSelectLayer->setVisible(isMove);
-  m_freehandBox->setVisible(isFreehand && supportOpacity);
+  m_freehandBox->setVisible(supportOpacity);
+  m_freehandAlgo->setVisible(isFreehand && supportOpacity);
+  m_snapField->updateFromDocument();
   m_toleranceLabel->setVisible(hasTolerance);
   m_tolerance->setVisible(hasTolerance);
   m_contiguous->setVisible(hasTolerance);
@@ -1659,6 +1974,22 @@ void ContextBar::updateForTool(tools::Tool* tool)
     Preferences::instance().symmetryMode.enabled() &&
     (isPaint || isEffect || hasSelectOptions));
   m_symmetry->updateWithCurrentDocument();
+
+  ActiveToolManager* manager = App::instance()->activeToolManager();
+  Tool* leftTool = manager->selectedTool();
+  Tool* rightTool = manager->rightClickAssignedTool();
+  const bool showSecondary =
+    leftTool && rightTool && leftTool != rightTool;
+  m_leftToolLabel->setVisible(showSecondary);
+  m_secondarySeparator->setVisible(showSecondary);
+  if (showSecondary) {
+    m_leftToolLabel->setText(
+      app::i18n("Left:") + " " + app::i18n(leftTool->getText()));
+    m_secondaryOptions->updateForTool(rightTool);
+  }
+  else {
+    m_secondaryOptions->updateForTool(nullptr);
+  }
 
   // Update ink shades with the current selected palette entries
   if (updateShade)

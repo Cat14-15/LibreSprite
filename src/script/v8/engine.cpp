@@ -21,10 +21,22 @@
 
 #include "app/resource_finder.h"
 #include <cstring>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <map>
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <thread>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #include <v8.h>
 #include <libplatform/libplatform.h>
@@ -52,6 +64,75 @@ public:
   inject<EngineDelegate> m_delegate;
   v8::Global<v8::Context> m_context;
   v8::Isolate* m_isolate = nullptr;
+  std::atomic_bool m_running{false};
+  std::atomic_bool m_stopRequested{false};
+  std::atomic_bool m_timedOut{false};
+  std::atomic_bool m_escapeStopped{false};
+
+  class ExecutionGuard {
+  public:
+    explicit ExecutionGuard(V8Engine& engine)
+      : m_engine(engine) {
+      m_engine.m_stopRequested = false;
+      m_engine.m_timedOut = false;
+      m_engine.m_escapeStopped = false;
+      m_engine.m_running = true;
+      m_watchdog = std::thread([this] { watch(); });
+    }
+
+    ~ExecutionGuard() {
+      finish();
+    }
+
+    void finish() {
+      if (m_finished)
+        return;
+      m_finished = true;
+      m_engine.m_running = false;
+      if (m_watchdog.joinable())
+        m_watchdog.join();
+      if (m_engine.m_isolate->IsExecutionTerminating())
+        m_engine.m_isolate->CancelTerminateExecution();
+    }
+
+    bool stopped() const {
+      return m_engine.m_stopRequested ||
+             m_engine.m_timedOut ||
+             m_engine.m_escapeStopped;
+    }
+
+  private:
+    void watch() {
+      int timeoutMs = 30000;
+      if (const char* configured = std::getenv("LIBRESPRITE_SCRIPT_TIMEOUT_MS"))
+        timeoutMs = std::max(1000, std::atoi(configured));
+      const auto deadline = std::chrono::steady_clock::now()+
+                            std::chrono::milliseconds(timeoutMs);
+      while (m_engine.m_running) {
+        if (m_engine.m_stopRequested) {
+          m_engine.m_isolate->TerminateExecution();
+          return;
+        }
+#ifdef _WIN32
+        if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0) {
+          m_engine.m_escapeStopped = true;
+          m_engine.m_isolate->TerminateExecution();
+          return;
+        }
+#endif
+        if (std::chrono::steady_clock::now() >= deadline) {
+          m_engine.m_timedOut = true;
+          m_engine.m_isolate->TerminateExecution();
+          return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      }
+    }
+
+    V8Engine& m_engine;
+    std::thread m_watchdog;
+    bool m_finished = false;
+  };
 
   V8Engine() {
     InternalScriptObject::setDefault("V8ScriptObject");
@@ -59,6 +140,25 @@ public:
   }
 
   v8::Local<v8::Context> context() { return m_context.Get(m_isolate); }
+
+  bool requestStop() override {
+    if (!m_running)
+      return false;
+    m_stopRequested = true;
+    m_isolate->TerminateExecution();
+    return true;
+  }
+
+  bool isRunning() const override { return m_running; }
+
+  void reportTermination() {
+    if (m_timedOut)
+      m_delegate->onConsolePrint("Script stopped: execution time limit reached.");
+    else if (m_escapeStopped)
+      m_delegate->onConsolePrint("Script stopped by Escape key.");
+    else
+      m_delegate->onConsolePrint("Script stopped by user.");
+  }
 
   void initV8() {
     static std::unique_ptr<v8::Platform> m_platform;
@@ -92,6 +192,7 @@ public:
     bool raiseEvent(const std::vector<script::Value>& event) override {
     // return eval("if (typeof onEvent === \"function\") onEvent(\"" + event + "\");");
     bool success = true;
+    ExecutionGuard execution(*this);
     try {
       v8::Isolate::Scope isolatescope(m_isolate);
       // Create a stack-allocated handle scope.
@@ -114,7 +215,11 @@ public:
         Check(onEvent.As<v8::Function>()->Call(context(), global, event.size(), argv.data()));
       }
 
-      if (trycatch.HasCaught()) {
+      if (trycatch.HasTerminated()) {
+        reportTermination();
+        success = false;
+      }
+      else if (trycatch.HasCaught()) {
         v8::Local<v8::Value> exception = trycatch.Exception();
         auto trace = trycatch.StackTrace(context());
 
@@ -133,12 +238,18 @@ public:
       m_delegate->onConsolePrint(ex.what());
       success = false;
     }
+    execution.finish();
+    if (success && execution.stopped()) {
+      reportTermination();
+      success = false;
+    }
     execAfterEval(success);
     return success;
   }
 
   bool eval(const std::string& code) override {
     bool success = true;
+    ExecutionGuard execution(*this);
     try {
       v8::Isolate::Scope isolatescope(m_isolate);
       // Create a stack-allocated handle scope.
@@ -163,7 +274,11 @@ public:
       }
 
       if (result.IsEmpty()) {
-        if (trycatch.HasCaught()) {
+        if (trycatch.HasTerminated()) {
+          reportTermination();
+          success = false;
+        }
+        else if (trycatch.HasCaught()) {
           v8::Local<v8::Value> exception = trycatch.Exception();
           auto trace = trycatch.StackTrace(context());
 
@@ -182,13 +297,19 @@ public:
         v8::String::Utf8Value utf8(m_isolate, result.ToLocalChecked());
         m_delegate->onConsolePrint(*utf8);
       }
-      m_isolate->LowMemoryNotification();
+      if (!m_isolate->IsExecutionTerminating())
+        m_isolate->LowMemoryNotification();
     } catch (const std::exception& ex) {
       std::string err = "Error: ";
       err += ex.what();
       m_delegate->onConsolePrint(err.c_str());
       success = false;
       std::cout << "Error: [" << err << "]" << std::endl;
+    }
+    execution.finish();
+    if (success && execution.stopped()) {
+      reportTermination();
+      success = false;
     }
     execAfterEval(success);
     return success;
@@ -336,7 +457,7 @@ public:
 static v8::Local<v8::Value> returnValue(v8::Isolate* isolate, const Value& value) {
     switch (value.type) {
     case Value::Type::UNDEFINED:
-        return v8::Local<v8::Value>();
+        return v8::Undefined(isolate);
 
     case Value::Type::INT:
         return v8::Int32::New(isolate, value);
@@ -351,7 +472,7 @@ static v8::Local<v8::Value> returnValue(v8::Isolate* isolate, const Value& value
         if (auto object = static_cast<ScriptObject*>(value)) {
             return static_cast<V8ScriptObject*>(object->getInternalScriptObject())->makeLocal();
         }
-        return {};
+        return v8::Undefined(isolate);
 
     case Value::Type::BUFFER: {
         auto& buffer = value.buffer();

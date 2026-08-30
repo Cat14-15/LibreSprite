@@ -57,12 +57,14 @@ namespace app {
       extern const char* AsEllipses;
       extern const char* AsBezier;
       extern const char* AsPixelPerfect;
+      extern const char* AsGridCells;
     };
 
     namespace WellKnownPointShapes {
       extern const char* None;
       extern const char* Pixel;
       extern const char* Brush;
+      extern const char* GridCell;
       extern const char* FloodFill;
       extern const char* Spray;
     };

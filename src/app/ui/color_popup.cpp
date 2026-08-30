@@ -57,6 +57,8 @@ ColorPopup::ColorPopup()
   , m_maskLabel("Transparent Color Selected")
   , m_disableHexUpdate(false)
 {
+  setI18N();
+  m_maskLabel.setI18N();
   m_colorType.addItem("Index");
   m_colorType.addItem("RGB");
   m_colorType.addItem("HSB");

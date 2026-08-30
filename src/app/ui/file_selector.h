@@ -22,6 +22,7 @@ namespace ui {
 
 namespace app {
   class CustomFileNameEntry;
+  class CustomPathEntry;
   class FileList;
   class FileListView;
   class IFileItem;
@@ -48,6 +49,10 @@ namespace app {
     void onGoForward();
     void onGoUp();
     void onNewFolder();
+    void onOpenCurrentFolder();
+    void onPathAccepted(const std::string& path);
+    void onRefreshFileList();
+    void onFileListContextMenu();
     void onLocationCloseListBox();
     void onFileTypeChange();
     void onFileListFileSelected();
@@ -59,6 +64,7 @@ namespace app {
     FileSelectorDelegate* m_delegate;
     std::string m_defExtension;
     CustomFileNameEntry* m_fileName;
+    CustomPathEntry* m_pathEntry;
     FileList* m_fileList;
     FileListView* m_fileView;
 

@@ -95,6 +95,42 @@ public:
 
 };
 
+// Paints the complete snap cell containing the input point. This makes grid
+// drawing independent of the current brush shape and prevents partially
+// painted or skipped cells during fast and diagonal strokes.
+class GridCellPointShape : public PointShape {
+  static int floorDiv(int value, int divisor) {
+    int quotient = value/divisor;
+    if (value%divisor < 0)
+      --quotient;
+    return quotient;
+  }
+
+  static gfx::Rect cellBounds(ToolLoop* loop, int x, int y) {
+    const gfx::Rect grid = loop->getSnapBounds();
+    if (grid.w <= 0 || grid.h <= 0)
+      return gfx::Rect(x, y, 1, 1);
+
+    return gfx::Rect(
+      grid.x+floorDiv(x-grid.x, grid.w)*grid.w,
+      grid.y+floorDiv(y-grid.y, grid.h)*grid.h,
+      grid.w, grid.h);
+  }
+
+public:
+  bool isGridCell() override { return true; }
+
+  void transformPoint(ToolLoop* loop, int x, int y, float pressure) override {
+    const gfx::Rect cell = cellBounds(loop, x, y);
+    for (int row=cell.y; row<cell.y2(); ++row)
+      doInkHline(cell.x, row, cell.x2()-1, loop);
+  }
+
+  void getModifiedArea(ToolLoop* loop, int x, int y, gfx::Rect& area) override {
+    area = cellBounds(loop, x, y);
+  }
+};
+
 class FloodFillPointShape : public PointShape {
 public:
   bool isFloodFill() override { return true; }

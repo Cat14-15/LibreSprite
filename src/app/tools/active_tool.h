@@ -35,6 +35,10 @@ public:
   // Returns the selected tool in the toolbar/box.
   Tool* selectedTool() const;
 
+  // Optional tool used only while the right mouse button is pressed.
+  // When null, the original right-click color/action behavior is used.
+  Tool* rightClickAssignedTool() const;
+
   // These are different events that came from UI elements and
   // modify the active tool.
   void newToolSelectedInToolBar(Tool* tool);
@@ -44,6 +48,7 @@ public:
   void pressButton(const Pointer& pointer);
   void releaseButtons();
   void setSelectedTool(Tool* tool);
+  void toggleRightClickAssignedTool(Tool* tool);
 
 private:
   static bool isToolAffectedByRightClickMode(Tool* tool);
@@ -58,6 +63,7 @@ private:
   bool m_rightClick;
   Tool* m_rightClickTool;
   std::shared_ptr<Ink> m_rightClickInk;
+  Tool* m_rightClickAssignedTool;
 
   // Special tool by stylus proximity (e.g. eraser).
   Tool* m_proximityTool;

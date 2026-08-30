@@ -453,8 +453,7 @@
     <!-- Editor Quicktools: these are modifiers to select quickly a
          tool without changing the current one -->
     <quicktools>
-      <key tool="eyedropper" shortcut="Alt" />
-      <key tool="move" shortcut="Ctrl" mac="Cmd" />
+      <key tool="eyedropper" shortcut="C" />
       <key tool="hand" shortcut="Space" />
     </quicktools>
 

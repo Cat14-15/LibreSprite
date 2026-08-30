@@ -14,6 +14,7 @@
 #include "app/commands/params.h"
 #include "app/document.h"
 #include "app/document_api.h"
+#include "app/modules/palettes.h"
 #include "base/launcher.h"
 #include "app/modules/editors.h"
 #include "app/script/app_scripting.h"
@@ -23,12 +24,15 @@
 #include "app/ui/editor/editor.h"
 #include "app/ui_context.h"
 #include "doc/site.h"
+#include "doc/palette.h"
+#include "doc/sprite.h"
 #include "script/engine.h"
 #include "script/engine_delegate.h"
 #include "script/script_object.h"
 #include "ui/widget.h"
 
 #include <sstream>
+#include <algorithm>
 
 class DudScriptObject : public script::InternalScriptObject {
 public:
@@ -104,6 +108,13 @@ public:
 
     addMethod("open", &AppScriptObject::open)
       .doc("Opens a document for editing");
+
+    addMethod("createSprite", &AppScriptObject::createSprite)
+      .doc("Creates and opens a new sprite without showing a dialog.")
+      .docArg("width", "Canvas width from 1 to 65535.")
+      .docArg("height", "Canvas height from 1 to 65535.")
+      .docArg("colorMode", "0=RGBA, 1=grayscale, 2=indexed.")
+      .docReturns("The newly created Sprite object.");
 
     addMethod("launch", &AppScriptObject::launch);
 
@@ -237,6 +248,33 @@ public:
     if (newDoc == oldDoc)
       return {};
     return getEngine()->getScriptObject(newDoc);
+  }
+
+  ScriptObject* createSprite(int width, int height, int colorMode) {
+    width = std::max(1, std::min(width, 65535));
+    height = std::max(1, std::min(height, 65535));
+    const auto format = static_cast<doc::PixelFormat>(
+      std::max(int(doc::IMAGE_RGB),
+               std::min(colorMode, int(doc::IMAGE_INDEXED))));
+
+    const int colorCount = app::get_default_palette()->size();
+    std::unique_ptr<doc::Sprite> sprite(
+      doc::Sprite::createBasicSprite(format, width, height, colorCount));
+    if (format != doc::IMAGE_GRAYSCALE)
+      app::get_default_palette()->copyColorsTo(*sprite->palette(doc::frame_t(0)));
+
+    doc::Sprite* result = sprite.get();
+    std::unique_ptr<app::Document> document(new app::Document(sprite.release()));
+    static int scriptSpriteCounter = 0;
+    document->setFilename("Script-Sprite-"+std::to_string(++scriptSpriteCounter));
+    document->setContext(app::UIContext::instance());
+    app::Document* createdDocument = document.release();
+    app::AppScripting::afterEval([createdDocument](bool success) {
+      if (!success)
+        delete createdDocument;
+    });
+
+    return getEngine()->getScriptObject(result);
   }
 
   bool launch(const std::string& cmd) {

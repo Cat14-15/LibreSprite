@@ -9,6 +9,7 @@
 
 #include "app/color.h"
 #include "app/tools/active_tool_observer.h"
+#include "base/connection.h"
 #include "base/time.h"
 #include "doc/context_observer.h"
 #include "doc/document_observer.h"
@@ -34,6 +35,7 @@ namespace render {
 
 namespace app {
   class ButtonSet;
+  class CommandExecutionEvent;
   class Editor;
   class ZoomEntry;
 
@@ -59,10 +61,10 @@ namespace app {
     void showTip(int msecs, const char *format, ...);
     void showColor(int msecs, const char* text, const Color& color);
     void showTool(int msecs, tools::Tool* tool);
-    void showSnapToGridWarning(bool state);
 
     // Used by AppEditor to update the zoom level in the status bar.
     void updateFromEditor(Editor* editor);
+    void updateWorkspaceButtons();
 
   protected:
     void onResize(ui::ResizeEvent& ev) override;
@@ -82,7 +84,15 @@ namespace app {
   private:
     void onCelOpacitySliderChange();
     void newFrame();
+    void toggleGrid();
+    void togglePixelGrid();
+    void showCheckedBgMenu();
+    void setCheckedBgSize(int type);
+    void toggleCheckedBgCentered();
+    void togglePalette();
+    void toggleTimeline();
     void onChangeZoom(const render::Zoom& zoom);
+    void onAfterCommandExecution(CommandExecutionEvent& ev);
 
     base::tick_t m_timeout;
 
@@ -93,19 +103,23 @@ namespace app {
 
     // Box of main commands
     ui::Widget* m_docControls;
+    ui::Widget* m_workspaceControls;
+    ui::Button* m_gridSettings;
+    ui::Button* m_pixelGridToggle;
+    ui::Button* m_checkedBgButton;
+    ui::Button* m_paletteToggle;
+    ui::Button* m_timelineToggle;
     ui::Label* m_frameLabel;
     ui::Entry* m_currentFrame;        // Current frame and go to frame entry
     ui::Button* m_newFrame;           // Button to create a new frame
     ZoomEntry* m_zoomEntry;
     doc::Document* m_doc;      // Document used to show the cel slider
+    base::ScopedConnection m_afterCmdConn;
 
     // Tip window
     class CustomizedTipWindow;
     CustomizedTipWindow* m_tipwindow;
 
-    // Snap to grid window
-    class SnapToGridWindow;
-    SnapToGridWindow* m_snapToGridWindow;
   };
 
 } // namespace app

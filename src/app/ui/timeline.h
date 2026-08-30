@@ -19,6 +19,8 @@
 #include "doc/layer_index.h"
 #include "doc/sprite.h"
 #include "ui/scroll_bar.h"
+#include "ui/box.h"
+#include "ui/button.h"
 #include "ui/timer.h"
 #include "ui/widget.h"
 
@@ -33,6 +35,7 @@ namespace doc {
 
 namespace ui {
   class Graphics;
+  class TipWindow;
 }
 
 namespace app {
@@ -222,6 +225,8 @@ namespace app {
     Hit hitTest(ui::Message* msg, const gfx::Point& mousePos);
     Hit hitTestCel(const gfx::Point& mousePos);
     void setHot(const Hit& hit);
+    void updateTooltip(const Hit& hit);
+    void closeTooltip();
     void showCel(LayerIndex layer, frame_t frame);
     void showCurrentCel();
     void cleanClk();
@@ -249,6 +254,13 @@ namespace app {
     bool validFrame(frame_t frame) const { return frame >= firstFrame() && frame <= lastFrame(); }
 
     int topHeight() const;
+    int frameSize() const;
+    int layerSize() const;
+    int headerSize() const;
+    void setTimelineScale(int scale, const gfx::Point& anchor = gfx::Point(-1, -1));
+    void zoomTimelineOut();
+    void resetTimelineZoom();
+    void zoomTimelineIn();
 
     DocumentPreferences& docPref() const;
     skin::SkinTheme* skinTheme() const;
@@ -276,6 +288,7 @@ namespace app {
     gfx::Point m_oldPos;
     // Configure timeline
     ConfigureTimelinePopup* m_confPopup;
+    ui::TipWindow* m_tipWindow;
     base::ScopedConnection m_ctxConn;
 
     // Marching ants stuff to show the range in the clipboard.
@@ -288,6 +301,11 @@ namespace app {
     bool m_fromTimeline;
 
     AniControls m_aniControls;
+    ui::HBox m_zoomControls;
+    ui::Button m_zoomOutButton;
+    ui::Button m_zoomResetButton;
+    ui::Button m_zoomInButton;
+    int m_timelineScale;
 
     // Temporal data used to move the range.
     struct MoveRange {

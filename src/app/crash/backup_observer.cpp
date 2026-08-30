@@ -65,7 +65,8 @@ void BackupObserver::onRemoveDocument(doc::Document* document)
 
 void BackupObserver::backgroundThread()
 {
-  int normalPeriod = 60*Preferences::instance().general.dataRecoveryPeriod();
+  int recoveryPeriod = Preferences::instance().general.dataRecoveryPeriod();
+  int normalPeriod = (recoveryPeriod == 0 ? 30 : 60*recoveryPeriod);
   int lockedPeriod = 10;
 #if 0                           // Just for testing purposes
   normalPeriod = 5;

@@ -69,6 +69,8 @@ namespace app {
 
     bool getTimelineVisibility() const;
     void setTimelineVisibility(bool visible);
+    bool getColorBarVisibility() const { return m_colorBarVisible; }
+    void setColorBarVisibility(bool visible);
     void popTimeline();
     void alternateTimeline();
     void alternateToolbar();
@@ -107,6 +109,7 @@ namespace app {
     ui::Widget* m_toolBar;
     WorkspaceTabs* m_tabsBar;
     Mode m_mode;
+    bool m_colorBarVisible;
     Timeline* m_timeline;
     Workspace* m_workspace;
     PreviewEditorWindow* m_previewEditor;

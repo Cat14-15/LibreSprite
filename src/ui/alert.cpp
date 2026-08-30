@@ -34,6 +34,7 @@
 
 #include "ui/alert.h"
 
+#include "app/modules/i18n.h"
 #include "base/bind.h"
 #include "ui/box.h"
 #include "ui/button.h"
@@ -45,6 +46,31 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <string>
+
+namespace {
+
+std::string translate_alert_format(const char* format)
+{
+  std::string translated;
+  std::size_t begin = 0;
+  const std::string source(format ? format: "");
+
+  for (std::size_t i = 0; i+1 < source.size(); ++i) {
+    const char chr = source[i];
+    if (chr == source[i+1] &&
+        (chr == '<' || chr == '=' || chr == '>' || chr == '-' || chr == '|')) {
+      translated += app::i18n(source.substr(begin, i-begin));
+      translated.append(2, chr);
+      begin = i+2;
+      ++i;
+    }
+  }
+  translated += app::i18n(source.substr(begin));
+  return translated;
+}
+
+} // anonymous namespace
 
 namespace ui {
 
@@ -75,10 +101,11 @@ AlertPtr Alert::create(const char* format, ...)
 {
   char buf[4096];
   va_list ap;
+  const std::string translatedFormat = translate_alert_format(format);
 
   // Process arguments
   va_start(ap, format);
-  vsnprintf(buf, sizeof(buf), format, ap);
+  vsnprintf(buf, sizeof(buf), translatedFormat.c_str(), ap);
   va_end(ap);
 
   // Create the alert window
@@ -96,10 +123,11 @@ int Alert::show(const char* format, ...)
 {
   char buf[4096];
   va_list ap;
+  const std::string translatedFormat = translate_alert_format(format);
 
   // Process arguments
   va_start(ap, format);
-  vsnprintf(buf, sizeof(buf), format, ap);
+  vsnprintf(buf, sizeof(buf), translatedFormat.c_str(), ap);
   va_end(ap);
 
   // Create the alert window
@@ -171,7 +199,7 @@ void Alert::processString(char* buf, std::vector<Widget*>& labels, std::vector<W
           button_widget->setMinSize(gfx::Size(60*guiscale(), 0));
           buttons.push_back(button_widget);
 
-          snprintf(buttonId, sizeof(buttonId), "button-%lu", buttons.size());
+          snprintf(buttonId, sizeof(buttonId), "button-%zu", buttons.size());
           button_widget->setId(buttonId);
           button_widget->Click.connect(base::Bind<void>(&Window::closeWindow, this, button_widget));
         }

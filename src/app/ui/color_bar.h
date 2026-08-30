@@ -108,6 +108,7 @@ namespace app {
     void onBgColorButtonChange(const app::Color& color);
     void onColorButtonChange(const app::Color& color);
     void onPickSpectrum(const app::Color& color, ui::MouseButtons buttons);
+    bool applyColorToSelectedPaletteEntries(const app::Color& color);
     void onReverseColors();
     void onSortBy(doc::SortPaletteBy channel);
     void onGradient();

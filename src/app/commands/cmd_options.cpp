@@ -168,11 +168,7 @@ public:
     );
 
 
-    // Screen/UI Scale
-    screenScale()->setSelectedItemIndex(
-      screenScale()->findItemIndexByValue(
-        base::convert_to<std::string>(m_pref.general.screenScale())));
-
+    // UI Scale
     uiScale()->setSelectedItemIndex(
       uiScale()->findItemIndexByValue(
         base::convert_to<std::string>(m_pref.experimental.uiScale())));
@@ -303,6 +299,7 @@ public:
     m_curPref->pixelGrid.autoOpacity(pixelGridAutoOpacity()->isSelected());
     m_curPref->bg.type(app::gen::BgType(checkedBgSize()->getSelectedItemIndex()));
     m_curPref->bg.zoom(checkedBgZoom()->isSelected());
+    m_curPref->bg.centered(checkedBgCentered()->isSelected());
     m_curPref->bg.color1(m_checked_bg_color1->getColor());
     m_curPref->bg.color2(m_checked_bg_color2->getColor());
 
@@ -322,12 +319,6 @@ public:
       m_pref.experimental.useNativeCursor());
 
     bool reset_screen = false;
-    int newScreenScale = base::convert_to<int>(screenScale()->getValue());
-    if (newScreenScale != m_pref.general.screenScale()) {
-      m_pref.general.screenScale(newScreenScale);
-      reset_screen = true;
-    }
-
     std::string newLanguage = language()->getValue();
     std::string oldLanguage = m_pref.general.language();
     if (newLanguage != oldLanguage) {
@@ -351,7 +342,7 @@ public:
       ui::Manager* manager = ui::Manager::getDefault();
       she::Display* display = manager->getDisplay();
       she::instance()->setGpuAcceleration(newGpuAccel);
-      display->setScale(newScreenScale);
+      display->setScale(1);
       manager->setDisplay(display);
     }
   }
@@ -388,6 +379,7 @@ private:
 
     checkedBgSize()->setSelectedItemIndex(int(m_curPref->bg.type()));
     checkedBgZoom()->setSelected(m_curPref->bg.zoom());
+    checkedBgCentered()->setSelected(m_curPref->bg.centered());
     m_checked_bg_color1->setColor(m_curPref->bg.color1());
     m_checked_bg_color2->setColor(m_curPref->bg.color2());
   }
@@ -407,6 +399,7 @@ private:
 
       checkedBgSize()->setSelectedItemIndex(int(pref.bg.type.defaultValue()));
       checkedBgZoom()->setSelected(pref.bg.zoom.defaultValue());
+      checkedBgCentered()->setSelected(pref.bg.centered.defaultValue());
       m_checked_bg_color1->setColor(pref.bg.color1.defaultValue());
       m_checked_bg_color2->setColor(pref.bg.color2.defaultValue());
     }
@@ -424,6 +417,7 @@ private:
 
       checkedBgSize()->setSelectedItemIndex(int(pref.bg.type()));
       checkedBgZoom()->setSelected(pref.bg.zoom());
+      checkedBgCentered()->setSelected(pref.bg.centered());
       m_checked_bg_color1->setColor(pref.bg.color1());
       m_checked_bg_color2->setColor(pref.bg.color2());
     }

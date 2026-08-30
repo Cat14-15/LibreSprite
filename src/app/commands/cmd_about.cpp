@@ -11,6 +11,7 @@
 
 #include "app/commands/command.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "base/bind.h"
 #include "ui/ui.h"
 
@@ -36,7 +37,8 @@ AboutCommand::AboutCommand()
 
 void AboutCommand::onExecute(Context* context)
 {
-  std::unique_ptr<Window> window(new Window(Window::WithTitleBar, "About " PACKAGE));
+  std::unique_ptr<Window> window(new Window(
+    Window::WithTitleBar, app::i18n("About") + " " PACKAGE));
   Box* box1 = new Box(VERTICAL);
   Grid* grid = new Grid(2, false);
   Label* title = new Label(PACKAGE_AND_VERSION);

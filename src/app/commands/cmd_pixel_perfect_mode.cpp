@@ -16,6 +16,7 @@
 #include "app/pref/preferences.h"
 #include "app/tools/freehand_algorithm.h"
 #include "app/tools/tool.h"
+#include "app/ui/context_bar.h"
 
 namespace app {
 
@@ -59,10 +60,14 @@ void PixelPerfectModeCommand::onExecute(Context* ctx)
     return;
 
   auto& toolPref = Preferences::instance().tool(tool);
-  toolPref.freehandAlgorithm(
-    toolPref.freehandAlgorithm() == tools::FreehandAlgorithm::DEFAULT ?
+  const bool enable =
+    toolPref.freehandAlgorithm() == tools::FreehandAlgorithm::DEFAULT;
+  if (enable)
+    toolPref.brush.size(1);
+  toolPref.freehandAlgorithm(enable ?
     tools::FreehandAlgorithm::PIXEL_PERFECT:
     tools::FreehandAlgorithm::DEFAULT);
+  App::instance()->contextBar()->updateForActiveTool();
 }
 
 Command* CommandFactory::createPixelPerfectModeCommand()

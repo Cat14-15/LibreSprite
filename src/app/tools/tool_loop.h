@@ -175,6 +175,7 @@ namespace app {
       virtual bool getSnapToGrid() = 0;
       virtual bool getStopAtGrid() = 0; // For floodfill-like tools
       virtual gfx::Rect getGridBounds() = 0;
+      virtual gfx::Rect getSnapBounds() = 0;
 
       // Returns true if the figure must be filled when we release the
       // mouse (e.g. a filled rectangle, etc.)

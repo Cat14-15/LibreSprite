@@ -79,18 +79,10 @@ enum class PalButton {
 using namespace app::skin;
 using namespace ui;
 
-class ColorBar::WarningIcon : public StyledButton {
+class ColorBar::WarningIcon : public Button {
 public:
   WarningIcon()
-    : StyledButton(skin::SkinTheme::instance()->styles.warningBox()) {
-  }
-
-protected:
-  void onPaint(ui::PaintEvent& ev) override {
-    // if (isEnabled())
-      StyledButton::onPaint(ev);
-    // else
-    //   ev.graphics()->fillRect(getBgColor(), clientBounds());
+    : Button("+") {
   }
 };
 
@@ -207,6 +199,8 @@ ColorBar::ColorBar(int align)
   m_bgColor.Change.connect(&ColorBar::onBgColorButtonChange, this);
   m_fgWarningIcon->Click.connect(base::Bind<void>(&ColorBar::onFixWarningClick, this, &m_fgColor, m_fgWarningIcon));
   m_bgWarningIcon->Click.connect(base::Bind<void>(&ColorBar::onFixWarningClick, this, &m_bgColor, m_bgWarningIcon));
+  setup_mini_look(m_fgWarningIcon);
+  setup_mini_look(m_bgWarningIcon);
 
   m_tooltips.addTooltipFor(&m_fgColor, "Foreground color", LEFT);
   m_tooltips.addTooltipFor(&m_bgColor, "Background color", LEFT);
@@ -818,12 +812,38 @@ void ColorBar::onPickSpectrum(const app::Color& color, ui::MouseButtons buttons)
   if (buttons == kButtonNone)
     buttons = m_lastButtons;
 
-  if ((buttons & kButtonRight) == kButtonRight)
-    setBgColor(color);
-  else if ((buttons & kButtonLeft) == kButtonLeft)
-    setFgColor(color);
+  {
+    // Keep the palette selection while the color selector is editing it.
+    base::ScopedValue<bool> lock(m_lock, true, false);
+    if ((buttons & kButtonRight) == kButtonRight)
+      setBgColor(color);
+    else if ((buttons & kButtonLeft) == kButtonLeft)
+      setFgColor(color);
+  }
+
+  applyColorToSelectedPaletteEntries(color);
 
   m_lastButtons = buttons;
+}
+
+bool ColorBar::applyColorToSelectedPaletteEntries(const app::Color& color)
+{
+  PalettePicks entries;
+  m_paletteView.getSelectedEntries(entries);
+  if (!entries.picks())
+    return false;
+
+  auto palette = get_current_palette()->clone();
+  const color_t value = doc::rgba(
+    color.getRed(), color.getGreen(), color.getBlue(), color.getAlpha());
+
+  for (int i=0; i<palette->size(); ++i) {
+    if (entries[i])
+      palette->setEntry(i, value);
+  }
+
+  setPalette(*palette, "Edit Palette Color");
+  return true;
 }
 
 void ColorBar::onReverseColors()

@@ -18,7 +18,6 @@
 #include "app/load_widget.h"
 #include "app/modules/editors.h"
 #include "app/pref/preferences.h"
-#include "app/ui/status_bar.h"
 #include "app/ui_context.h"
 #include "doc/document.h"
 #include "doc/mask.h"
@@ -50,7 +49,6 @@ protected:
     bool newValue = !docPref.grid.snap();
     docPref.grid.snap(newValue);
 
-    StatusBar::instance()->showSnapToGridWarning(newValue);
   }
 };
 

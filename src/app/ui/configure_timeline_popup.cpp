@@ -41,6 +41,7 @@ ConfigureTimelinePopup::ConfigureTimelinePopup()
   : PopupWindow("Timeline Settings", ClickBehavior::CloseOnClickInOtherWindow)
   , m_lockUpdates(false)
 {
+  setI18N();
   setAutoRemap(false);
   setBorder(gfx::Border(4*guiscale()));
 

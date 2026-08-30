@@ -11,7 +11,12 @@
       <button text="" id="go_up_button" tooltip="Up to parent folder&#10;(Backspace)" />
       <button text="" id="new_folder_button" tooltip="New folder" />
       <combobox id="location" expansive="true" />
+      <button text="Open Folder" id="open_folder_button" tooltip="Open current folder in the system file manager" />
     </box>
+    <hbox>
+      <label text="Path:" />
+      <box id="path_entry_placeholder" expansive="true" />
+    </hbox>
     <vbox id="file_view_placeholder" expansive="true" />
     <grid columns="2">
       <label text="File name:" />

@@ -23,7 +23,7 @@
 namespace ui {
 class Dialog : public ui::Window {
 public:
-  Dialog() : ui::Window(ui::Window::WithTitleBar, "Script") {}
+  Dialog() : ui::Window(ui::Window::WithTitleBar, "Script") { setI18N(); }
 
   ~Dialog() {
     if (m_grid) {

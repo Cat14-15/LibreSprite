@@ -52,6 +52,7 @@ Console::Console(Context* ctx)
     return;
 
   Window* window = new Window(Window::WithTitleBar, "Errors Console");
+  window->setI18N();
   Grid* grid = new Grid(1, false);
   View* view = new View();
   TextBox* textbox = new TextBox("", WORDWRAP);

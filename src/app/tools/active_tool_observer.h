@@ -21,6 +21,9 @@ namespace tools {
 
     // Called when a new tool is selected in the tool box.
     virtual void onSelectedToolChange(tools::Tool* tool) { }
+
+    // Called when the tool assigned to the right mouse button changes.
+    virtual void onRightClickToolChange(tools::Tool* tool) { }
   };
 
 } // namespace tools

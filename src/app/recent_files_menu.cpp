@@ -60,6 +60,7 @@ void RecentFilesMenu::rebuildRecentList()
     }
     else {
         auto menuitem = new AppMenuItem("Nothing", NULL, Params());
+        menuitem->setI18N();
         menuitem->setEnabled(false);
         submenu->addChild(menuitem);
     }

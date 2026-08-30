@@ -14,6 +14,7 @@
 #include "app/context.h"
 #include "app/file_selector.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/resource_finder.h"
 #include "app/tools/tool.h"
 #include "app/ui/app_menuitem.h"
@@ -319,7 +320,7 @@ private:
 
             m_addButton->setBgColor(gfx::ColorNone);
             m_addButton->setBounds(itemBounds);
-            m_addButton->setText("Add");
+            m_addButton->setText(app::i18n("Add"));
 
             auto label = m_key ? m_key->label().c_str() : "";
             m_labelEntry.reset(new Entry(4, "%s", label));
@@ -390,10 +391,10 @@ public:
     : m_searchChange(false) {
     setAutoRemap(false);
 
-    section()->addChild(new ListItem("Menus"));
-    section()->addChild(new ListItem("Commands"));
-    section()->addChild(new ListItem("Tools"));
-    section()->addChild(new ListItem("Action Modifiers"));
+    section()->addChild(new ListItem(i18n("Menus")));
+    section()->addChild(new ListItem(i18n("Commands")));
+    section()->addChild(new ListItem(i18n("Tools")));
+    section()->addChild(new ListItem(i18n("Action Modifiers")));
 
     search()->Change.connect(base::Bind<void>(&KeyboardShortcutsWindow::onSearchChange, this));
     section()->Change.connect(base::Bind<void>(&KeyboardShortcutsWindow::onSectionChange, this));
@@ -464,6 +465,7 @@ private:
           text = "Shape Tools: " + text;
           break;
       }
+      text = i18n(text);
       KeyItem* keyItem = new KeyItem(text, key, NULL, 0);
 
       ListBox* listBox = NULL;

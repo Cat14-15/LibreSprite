@@ -28,6 +28,7 @@ namespace ui {
   class Box;
   class Button;
   class Label;
+  class Separator;
 }
 
 namespace tools {
@@ -84,6 +85,7 @@ namespace app {
 
     // ActiveToolObserver impl
     void onActiveToolChange(tools::Tool* tool) override;
+    void onRightClickToolChange(tools::Tool* tool) override;
 
     class BrushTypeField;
     class BrushAngleField;
@@ -106,6 +108,8 @@ namespace app {
     class DropPixelsField;
     class AutoSelectLayerField;
     class SymmetryField;
+    class SnapField;
+    class SecondaryToolOptions;
 
     BrushTypeField* m_brushType;
     BrushAngleField* m_brushAngle;
@@ -122,6 +126,7 @@ namespace app {
     AutoSelectLayerField* m_autoSelectLayer;
     ui::Box* m_freehandBox;
     FreehandAlgorithmField* m_freehandAlgo;
+    SnapField* m_snapField;
     BrushPatternField* m_brushPatternField;
     ui::Box* m_sprayBox;
     ui::Label* m_sprayLabel;
@@ -136,6 +141,9 @@ namespace app {
     doc::BrushRef m_activeBrush;
     ui::Label* m_selectBoxHelp;
     SymmetryField* m_symmetry;
+    ui::Label* m_leftToolLabel;
+    ui::Separator* m_secondarySeparator;
+    SecondaryToolOptions* m_secondaryOptions;
     base::ScopedConnection m_sizeConn;
     base::ScopedConnection m_angleConn;
     base::ScopedConnection m_opacityConn;

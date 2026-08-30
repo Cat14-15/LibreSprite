@@ -12,6 +12,7 @@
 #include "app/app.h"
 #include "app/commands/command.h"
 #include "app/ini_file.h"
+#include "app/modules/i18n.h"
 #include "app/ui/keyboard_shortcuts.h"
 #include "app/ui/main_window.h"
 #include "ui/ui.h"
@@ -67,7 +68,8 @@ void AdvancedModeCommand::onExecute(Context* context)
     if (!key->accels().empty()) {
       app::gen::AdvancedMode window;
 
-      window.warningLabel()->setTextf("You can go back pressing \"%s\" key.",
+      window.warningLabel()->setTextf(app::i18n(
+        "You can go back pressing \"%s\" key.").c_str(),
         key->accels().front().toString().c_str());
 
       window.openWindowInForeground();

@@ -22,6 +22,7 @@
 #include "app/modules/editors.h"
 #include "app/modules/gfx.h"
 #include "app/modules/gui.h"
+#include "app/modules/i18n.h"
 #include "app/modules/palettes.h"
 #include "app/pref/preferences.h"
 #include "app/tools/active_tool.h"
@@ -654,7 +655,10 @@ void Editor::drawSpriteUnclippedRect(ui::Graphics* g, const gfx::Rect& _rc)
     if (symmetryMode & (int)app::gen::SymmetryMode::HORIZONTAL) {
       int x = m_docPref.symmetry.xAxis();
       if (x > 0) {
-        gfx::Color color = color_utils::color_for_ui(m_docPref.grid.color());
+        const bool centered = (x == m_sprite->width()/2);
+        gfx::Color color =
+          (centered ? theme->colors.buttonSelectedText():
+                      color_utils::color_for_ui(m_docPref.grid.color()));
         g->drawVLine(color,
                      spriteRect.x + m_zoom.apply(x),
                      enclosingRect.y,
@@ -664,7 +668,10 @@ void Editor::drawSpriteUnclippedRect(ui::Graphics* g, const gfx::Rect& _rc)
     if (symmetryMode & (int)app::gen::SymmetryMode::VERTICAL) {
       int y = m_docPref.symmetry.yAxis();
       if (y > 0) {
-        gfx::Color color = color_utils::color_for_ui(m_docPref.grid.color());
+        const bool centered = (y == m_sprite->height()/2);
+        gfx::Color color =
+          (centered ? theme->colors.buttonSelectedText():
+                      color_utils::color_for_ui(m_docPref.grid.color()));
         g->drawHLine(color,
                      enclosingRect.x,
                      spriteRect.y + m_zoom.apply(y),
@@ -1608,7 +1615,8 @@ void Editor::showAnimationSpeedMultiplierPopup(Option<bool>& playOnce,
   Menu menu;
 
   for (double option : options) {
-    MenuItem* item = new MenuItem("Speed x" + base::convert_to<std::string>(option));
+    MenuItem* item = new MenuItem(
+      app::i18n("Speed") + " x" + base::convert_to<std::string>(option));
     item->Click.connect(base::Bind<void>(&Editor::setAnimationSpeedMultiplier, this, option));
     item->setSelected(m_aniSpeed == option);
     menu.addChild(item);
@@ -1619,6 +1627,7 @@ void Editor::showAnimationSpeedMultiplierPopup(Option<bool>& playOnce,
   // Play once option
   {
     MenuItem* item = new MenuItem("Play Once");
+    item->setI18N();
     item->Click.connect(
       [&playOnce]() {
         playOnce(!playOnce());
@@ -1629,6 +1638,7 @@ void Editor::showAnimationSpeedMultiplierPopup(Option<bool>& playOnce,
 
   if (withStopBehaviorOptions) {
     MenuItem* item = new MenuItem("Rewind on Stop");
+    item->setI18N();
     item->Click.connect(
       []() {
         // Switch the "rewind_on_stop" option

@@ -54,6 +54,10 @@ namespace script {
 
     virtual bool eval(const std::string& code) = 0;
     virtual bool raiseEvent(const std::vector<script::Value>& event) = 0;
+    // Requests cancellation of the current evaluation. Implementations that
+    // cannot safely interrupt execution return false.
+    virtual bool requestStop() { return false; }
+    virtual bool isRunning() const { return false; }
 
     void afterEval(std::function<void(bool)>&& callback) {
       m_afterEvalListeners.emplace_back(std::move(callback));
