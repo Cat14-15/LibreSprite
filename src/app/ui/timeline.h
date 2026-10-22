@@ -264,6 +264,7 @@ namespace app {
     void createAnimation(bool duplicate);
     void layerKeyMenu();
     void applyLayerKey(int action);
+    void prepareWorkflowEdit();
     int workflowHeight() const;
     int topHeight() const;
     int frameSize() const;

@@ -217,6 +217,34 @@ static int fullUI(const char* executable) {
     author.start();timeline->createAnimation(false);author.stop();repaint();
     require(createdFromDialog && sprite->frameTags().getByName("attack"),"actual creation dialog must create the requested animation");
     require(timeline->firstFrame()==13 && timeline->lastFrame()==15,"creation dialog must activate only the new animation");
+
+    // User regression: a floating selection owns a reader, so taking a new
+    // writer directly used to show "Cannot modify the sprite" on Drawing Key.
+    timeline->setLayer(arm);timeline->setFrame(timeline->lastFrame(),true);
+    arm->setVisible(true);repaint();
+    const auto untouchedBody=body->cel(timeline->lastFrame())->dataRef();
+    const int frameCount=sprite->totalFrames();
+    doc::ImageRef pasted(doc::Image::create(doc::IMAGE_RGB,2,2));
+    doc::clear_image(pasted.get(),doc::rgba(0,255,0,255));
+    editor->pasteImage(pasted.get());
+    require(editor->isMovingPixels(),"fixture must have a real floating paste");
+    bool blockedWriter=false;
+    try {app::ContextWriter writer(app::UIContext::instance());}
+    catch (const app::CannotWriteDocumentException&) {blockedWriter=true;}
+    require(blockedWriter,"floating selection must reproduce the document writer conflict");
+    const auto floatingKeyButton=timeline->m_keyButton.bounds().center();
+    down(floatingKeyButton);up(floatingKeyButton);
+    require(!editor->isMovingPixels(),"Drawing Key must commit the pending pixels before acquiring a writer");
+    const auto keyFrame=timeline->lastFrame();
+    require(arm->cel(keyFrame)->dataRef()!=arm->cel(keyFrame-1)->dataRef(),"last-frame drawing key must edit independently from the previous frame");
+    bool greenPreserved=false;
+    auto drawing=arm->cel(keyFrame)->image();
+    for (int y=0;y<drawing->height();++y) for (int x=0;x<drawing->width();++x)
+      if (drawing->getPixel(x,y)==doc::rgba(0,255,0,255)) greenPreserved=true;
+    require(greenPreserved,"creating a key must preserve the user's floating pixels");
+    require(sprite->totalFrames()==frameCount && body->cel(keyFrame)->dataRef()==untouchedBody,"drawing key must not add global frames or modify other layers");
+    std::cerr << "CHECK: floating-selection writer conflict reproduced; real key-button click commits pixels and creates independent final key\n";
+
     if (const char* path=std::getenv("LIBRESPRITE_WORKFLOW_SCREENSHOT")) {
       const auto png=she::instance()->encodeSurfaceAsPNG(manager->getDisplay()->getSurface());
       std::ofstream output(path,std::ios::binary);output.write(reinterpret_cast<const char*>(png.data()),png.size());

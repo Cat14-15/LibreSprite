@@ -2934,6 +2934,7 @@ void Timeline::animationMenu() {
   },selectedAnimation()!=nullptr);
   add(workflowText("Remove tag (keep drawings)","동작 태그 삭제 (그림 유지)"),[this]{
     auto tag=selectedAnimation();if (!tag) return;
+    prepareWorkflowEdit();
     {ContextWriter writer(m_context);Transaction tx(m_context,"Remove animation tag");tx.execute(new cmd::RemoveFrameTag(m_sprite,tag));tx.commit();}
     m_animationId=NullId;refreshWorkflow();updateScrollBars();invalidate();
   },selectedAnimation()!=nullptr);
@@ -2954,6 +2955,7 @@ void Timeline::createAnimation(bool duplicate) {
   ok.Click.connect([&]{window.closeWindow(&ok);});cancel.Click.connect([&]{window.closeWindow(&cancel);});
   window.remapWindow();window.centerWindow();name.selectAllText();name.requestFocus();window.openWindowInForeground();if (window.closer()!=&ok) return;
   try {ObjectId id;
+    prepareWorkflowEdit();
     {ContextWriter writer(m_context);Transaction tx(m_context,duplicate?"Duplicate animation":"Create animation");
       auto tag=animation::appendClip(m_document,tx,name.text(),count.textInt(),duration.textInt(),m_frame,source);id=tag->id();tx.commit();}
     selectAnimation(id);m_document->notifyGeneralUpdate();
@@ -2966,10 +2968,17 @@ void Timeline::layerKeyMenu() {
   for (int i=0;i<4;++i) {auto item=new MenuItem(names[i]);item->Click.connect([this,i]{applyLayerKey(i);});menu.addChild(item);}
   menu.showPopup(gfx::Point(m_layerKeyButton.bounds().x,m_layerKeyButton.bounds().y2()));
 }
+void Timeline::prepareWorkflowEdit() {
+  if (!m_editor) return;
+  // Floating selections keep a document reader alive. Commit the pending
+  // pixels before taking a writer, just as normal editor commands do.
+  if (m_editor->isMovingPixels()) m_editor->dropMovingPixels();
+  if (m_editor->isPlaying()) m_editor->stop();
+}
 void Timeline::applyLayerKey(int action) {
   if (!m_document || !m_layer || !m_layer->isImage()) return;
   try {
-    if (m_editor->isPlaying()) m_editor->stop();
+    prepareWorkflowEdit();
     auto layer=static_cast<LayerImage*>(m_layer);frame_t from=m_frame,to=m_frame;
     bool range=m_range.enabled() && (m_range.type()==Range::kCels || m_range.type()==Range::kFrames) && m_range.frames()>1;
     if (range) {from=MAX(firstFrame(),m_range.frameBegin());to=MIN(lastFrame(),m_range.frameEnd());}
