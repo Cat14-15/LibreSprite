@@ -65,6 +65,7 @@ public:
   PaletteEntryEditor();
 
   void setColor(const app::Color& color);
+  void applyEyedropperColor(const app::Color& color);
 
 protected:
   bool onProcessMessage(Message* msg) override;
@@ -420,6 +421,29 @@ void PaletteEntryEditor::onFgBgColorChange(const app::Color& _color)
     setColor(color);
     resetRelativeInfo();
   }
+}
+
+void PaletteEntryEditor::applyEyedropperColor(const app::Color& color)
+{
+  if (!isVisible() || !color.isValid() ||
+      color.getType() == app::Color::MaskType)
+    return;
+
+  PalettePicks picks;
+  getPicks(picks);
+  if (picks.picks() == 0)
+    return;
+
+  setPaletteEntry(color);
+  updateCurrentSpritePalette("Eyedropper Palette Color");
+  updateColorBar();
+  updateWidgetsFromSelectedEntries();
+}
+
+void apply_eyedropper_to_palette_editor(const app::Color& color)
+{
+  if (g_window)
+    g_window->applyEyedropperColor(color);
 }
 
 void PaletteEntryEditor::onColorSlidersChange(ColorSlidersChangeEvent& ev)

@@ -30,6 +30,8 @@
 
 namespace app {
 
+void apply_eyedropper_to_palette_editor(const app::Color& color);
+
 using namespace ui;
 
 EyedropperCommand::EyedropperCommand()
@@ -186,6 +188,8 @@ void EyedropperCommand::onExecute(Context* context)
     pref.colorBar.bgColor(color);
   else
     pref.colorBar.fgColor(color);
+
+  apply_eyedropper_to_palette_editor(color);
 }
 
 Command* CommandFactory::createEyedropperCommand()

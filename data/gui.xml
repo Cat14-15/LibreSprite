@@ -110,9 +110,6 @@
       <key command="SnapToGrid" shortcut="Shift+S" />
       <key command="SetLoopSection" shortcut="F2" />
       <key command="ShowOnionSkin" shortcut="F3" />
-      <key command="Timeline" shortcut="Tab" label="TIME">
-        <param name="switch" value="true" />
-      </key>
       <key command="PaletteEditor" shortcut="F4">
         <param name="switch" value="true" />
       </key>

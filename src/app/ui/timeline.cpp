@@ -65,6 +65,7 @@
 
 // Width of the frames.
 #define FRMSIZE         (frameSize())
+#define ICONSIZE        (12*guiscale())
 
 // Height of the layers.
 #define LAYSIZE         (layerSize())
@@ -910,9 +911,8 @@ bool Timeline::onProcessMessage(Message* msg)
         if (msg->ctrlPressed()) {
           const gfx::Point anchor =
             static_cast<MouseMessage*>(msg)->position() - bounds().origin();
-          setTimelineScale(m_timelineScale +
-                           ((static_cast<MouseMessage*>(msg)->wheelDelta().x - dz) > 0 ? 25: -25),
-                           anchor);
+          if (dz != 0)
+            setTimelineScale(m_timelineScale + (dz < 0 ? 25: -25), anchor);
           return true;
         }
         else if (msg->shiftPressed()) {
@@ -1829,23 +1829,23 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
         m_separator_x + m_separator_w, bounds.h - y);
 
     case PART_HEADER_EYE:
-      return gfx::Rect(bounds.x + FRMSIZE*0, bounds.y + y, FRMSIZE, HDRSIZE);
+      return gfx::Rect(bounds.x, bounds.y + y, ICONSIZE, HDRSIZE);
 
     case PART_HEADER_PADLOCK:
-      return gfx::Rect(bounds.x + FRMSIZE*1, bounds.y + y, FRMSIZE, HDRSIZE);
+      return gfx::Rect(bounds.x + ICONSIZE, bounds.y + y, ICONSIZE, HDRSIZE);
 
     case PART_HEADER_CONTINUOUS:
-      return gfx::Rect(bounds.x + FRMSIZE*2, bounds.y + y, FRMSIZE, HDRSIZE);
+      return gfx::Rect(bounds.x + ICONSIZE*2, bounds.y + y, ICONSIZE, HDRSIZE);
 
     case PART_HEADER_GEAR:
-      return gfx::Rect(bounds.x + FRMSIZE*3, bounds.y + y, FRMSIZE, HDRSIZE);
+      return gfx::Rect(bounds.x + ICONSIZE*3, bounds.y + y, ICONSIZE, HDRSIZE);
 
     case PART_HEADER_ONIONSKIN:
-      return gfx::Rect(bounds.x + FRMSIZE*4, bounds.y + y, FRMSIZE, HDRSIZE);
+      return gfx::Rect(bounds.x + ICONSIZE*4, bounds.y + y, ICONSIZE, HDRSIZE);
 
     case PART_HEADER_LAYER:
-      return gfx::Rect(bounds.x + FRMSIZE*5, bounds.y + y,
-        m_separator_x - FRMSIZE*5, HDRSIZE);
+      return gfx::Rect(bounds.x + ICONSIZE*5, bounds.y + y,
+        m_separator_x - ICONSIZE*5, HDRSIZE);
 
     case PART_HEADER_FRAME:
       return gfx::Rect(
@@ -1871,29 +1871,29 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
       if (validLayer(hit.layer)) {
         return gfx::Rect(bounds.x,
           bounds.y + y + HDRSIZE + LAYSIZE*(lastLayer()-hit.layer) - viewScroll().y,
-          FRMSIZE, LAYSIZE);
+          ICONSIZE, LAYSIZE);
       }
       break;
 
     case PART_LAYER_PADLOCK_ICON:
       if (validLayer(hit.layer)) {
-        return gfx::Rect(bounds.x + FRMSIZE,
+        return gfx::Rect(bounds.x + ICONSIZE,
           bounds.y + y + HDRSIZE + LAYSIZE*(lastLayer()-hit.layer) - viewScroll().y,
-          FRMSIZE, LAYSIZE);
+          ICONSIZE, LAYSIZE);
       }
       break;
 
     case PART_LAYER_CONTINUOUS_ICON:
       if (validLayer(hit.layer)) {
-        return gfx::Rect(bounds.x + 2*FRMSIZE,
+        return gfx::Rect(bounds.x + 2*ICONSIZE,
           bounds.y + y + HDRSIZE + LAYSIZE*(lastLayer()-hit.layer) - viewScroll().y,
-          FRMSIZE, LAYSIZE);
+          ICONSIZE, LAYSIZE);
       }
       break;
 
     case PART_LAYER_TEXT:
       if (validLayer(hit.layer)) {
-        int x = FRMSIZE*3;
+        int x = ICONSIZE*3;
         return gfx::Rect(bounds.x + x,
           bounds.y + y + HDRSIZE + LAYSIZE*(lastLayer()-hit.layer) - viewScroll().y,
           m_separator_x - x, LAYSIZE);
@@ -2723,7 +2723,7 @@ int Timeline::frameSize() const
 
 int Timeline::layerSize() const
 {
-  return MAX(6*guiscale(), 12*guiscale()*m_timelineScale/100);
+  return ICONSIZE;
 }
 
 int Timeline::headerSize() const
@@ -2738,28 +2738,17 @@ void Timeline::setTimelineScale(int scale, const gfx::Point& anchor)
     return;
 
   const int oldFrameSize = frameSize();
-  const int oldLayerSize = layerSize();
   gfx::Point scroll = viewScroll();
 
   m_timelineScale = scale;
 
   const int newFrameSize = frameSize();
-  const int newLayerSize = layerSize();
   if (anchor.x >= m_separator_x) {
     const int relativeX = anchor.x-m_separator_x;
     scroll.x = (scroll.x+relativeX)*newFrameSize/oldFrameSize-relativeX;
   }
   else {
     scroll.x = scroll.x*newFrameSize/oldFrameSize;
-  }
-
-  const int contentTop = topHeight()+oldLayerSize;
-  if (anchor.y >= contentTop) {
-    const int relativeY = anchor.y-contentTop;
-    scroll.y = (scroll.y+relativeY)*newLayerSize/oldLayerSize-relativeY;
-  }
-  else {
-    scroll.y = scroll.y*newLayerSize/oldLayerSize;
   }
 
   m_zoomResetButton.setTextf("%d%%", m_timelineScale);
