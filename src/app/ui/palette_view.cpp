@@ -12,6 +12,7 @@
 #include "app/app.h"
 #include "app/color_utils.h"
 #include "app/commands/commands.h"
+#include "app/commands/params.h"
 #include "app/modules/editors.h"
 #include "app/modules/gfx.h"
 #include "app/modules/gui.h"
@@ -21,6 +22,7 @@
 #include "app/ui/skin/skin_theme.h"
 #include "app/ui/skin/style.h"
 #include "app/ui/status_bar.h"
+#include "app/ui_context.h"
 #include "app/util/clipboard.h"
 #include "base/convert_to.h"
 #include "doc/image.h"
@@ -274,6 +276,25 @@ bool PaletteView::onProcessMessage(Message* msg)
 
     case kFocusEnterMessage:
       FocusEnter();
+      break;
+
+    case kDoubleClickMessage:
+      if (m_editable && static_cast<MouseMessage*>(msg)->left()) {
+        Hit hit = hitTest(static_cast<MouseMessage*>(msg)->position()-bounds().origin());
+        if ((hit.part == Hit::COLOR || hit.part == Hit::OUTLINE) &&
+            hit.color >= 0 && hit.color < currentPalette()->size()) {
+          deselect();
+          selectColor(hit.color);
+          m_selectedEntries[hit.color] = true;
+          if (m_delegate)
+            m_delegate->onPaletteViewIndexChange(hit.color, kButtonLeft);
+          Params params;
+          params.set("open", "true");
+          UIContext::instance()->executeCommand(
+            CommandsModule::instance()->getCommandByName(CommandId::PaletteEditor), params);
+          return true;
+        }
+      }
       break;
 
     case kKeyDownMessage:

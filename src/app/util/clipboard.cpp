@@ -523,10 +523,11 @@ void paste()
               afterThis = dstSpr->folder()->getLastLayer();
 
             LayerImage* newLayer = new LayerImage(dstSpr);
-            api.addLayer(dstSpr->folder(), newLayer, afterThis);
 
             srcDoc->copyLayerContent(
               srcLayers[i], dstDoc, newLayer);
+            newLayer->setName(DocumentApi::uniqueLayerName(dstSpr, newLayer->name()));
+            api.addLayer(dstSpr->folder(), newLayer, afterThis);
           }
 
           transaction.commit();

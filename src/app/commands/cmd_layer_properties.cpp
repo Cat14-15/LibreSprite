@@ -305,6 +305,7 @@ void LayerPropertiesCommand::onExecute(Context* context)
 
   // Focus layer name
   g_window->name()->requestFocus();
+  g_window->name()->selectAllText();
 }
 
 Command* CommandFactory::createLayerPropertiesCommand()

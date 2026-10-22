@@ -79,6 +79,8 @@ namespace app {
 
     // Layers API
     LayerImage* newLayer(Sprite* sprite, const std::string& name);
+    static std::string uniqueLayerName(Sprite* sprite, const std::string& name,
+                                        const Layer* ignore = nullptr);
     LayerFolder* newLayerFolder(Sprite* sprite);
     void addLayer(LayerFolder* folder, Layer* newLayer, Layer* afterThis);
     void removeLayer(Layer* layer);

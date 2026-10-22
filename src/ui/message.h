@@ -51,6 +51,9 @@ namespace ui {
     void addRecipient(Widget* widget);
     void prependRecipient(Widget* widget);
     void removeRecipient(Widget* widget);
+    void setLastRecipient(Widget* widget) {
+      if (!m_recipients.empty()) m_recipients.back() = widget;
+    }
 
     void broadcastToChildren(Widget* widget);
 

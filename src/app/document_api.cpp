@@ -457,13 +457,32 @@ void DocumentApi::flattenLayers(Sprite* sprite)
   m_transaction.execute(new cmd::FlattenLayers(sprite));
 }
 
+std::string DocumentApi::uniqueLayerName(Sprite* sprite, const std::string& name,
+                                         const Layer* ignore)
+{
+  const std::string base = name.empty() ? "Layer": name;
+  std::string candidate = base;
+  for (int suffix=1; ; ++suffix) {
+    bool exists = false;
+    for (LayerIndex i(0); i<sprite->countLayers(); ++i) {
+      Layer* layer = sprite->indexToLayer(i);
+      if (layer != ignore && layer->name() == candidate) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) return candidate;
+    candidate = base + "-" + std::to_string(suffix);
+  }
+}
+
 void DocumentApi::duplicateLayerAfter(Layer* sourceLayer, Layer* afterLayer)
 {
   std::unique_ptr<LayerImage> newLayerPtr(new LayerImage(sourceLayer->sprite()));
 
   m_document->copyLayerContent(sourceLayer, m_document, newLayerPtr.get());
 
-  newLayerPtr->setName(newLayerPtr->name() + " Copy");
+  newLayerPtr->setName(uniqueLayerName(sourceLayer->sprite(), sourceLayer->name()));
 
   addLayer(sourceLayer->parent(), newLayerPtr.get(), afterLayer);
 

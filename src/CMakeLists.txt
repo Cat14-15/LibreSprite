@@ -151,6 +151,11 @@ target_link_libraries(libresprite ${KEEP_INJECTIONS_BEGIN}
 install(TARGETS libresprite
   RUNTIME DESTINATION bin)
 
+# Manual input regression checks; no display or external test package needed.
+add_executable(interaction-regression EXCLUDE_FROM_ALL tests/interaction_regression.cpp)
+get_target_property(interaction_test_libraries libresprite LINK_LIBRARIES)
+target_link_libraries(interaction-regression ${interaction_test_libraries})
+
 install(DIRECTORY ../data
   DESTINATION share/libresprite)
 else()

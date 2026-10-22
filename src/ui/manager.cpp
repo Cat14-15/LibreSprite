@@ -474,6 +474,11 @@ void Manager::handleMouseDown(const gfx::Point& mousePos,
                               PointerType pointerType,
                               float pressure)
 {
+  // A press can arrive before another motion event. Pick at the press
+  // position instead of reusing the previous hover target.
+  Widget* target = mouseInputTarget(mousePos);
+  if (!capture_widget && target && target != mouse_widget)
+    setMouse(target);
   handleWindowZOrder();
 
   enqueueMessage(
@@ -561,11 +566,22 @@ Widget* Manager::mouseInputTarget(const gfx::Point& mousePos)
   // same click to a canvas tool behind settings, save, or exit dialogs.
   Window* foreground = getForegroundWindow();
   if (foreground && foreground->isForeground()) {
+    if (capture_widget && capture_widget->window() == foreground)
+      return capture_widget;
     Widget* picked = foreground->pick(mousePos);
     return (picked ? picked: foreground);
   }
 
-  return (capture_widget ? capture_widget: mouse_widget);
+  if (capture_widget)
+    return capture_widget;
+
+  WidgetsList targets;
+  broadcastMouseMessage(targets);
+  for (Widget* root : targets) {
+    if (Widget* picked = root->pick(mousePos))
+      return picked;
+  }
+  return nullptr;
 }
 
 // Handles Z order: Send the window to top (only when you click in a
@@ -862,7 +878,7 @@ void Manager::setCapture(Widget* widget)
   widget->enableFlags(HAS_CAPTURE);
   capture_widget = widget;
 
-  m_display->captureMouse();
+  if (m_display) m_display->captureMouse();
 }
 
 // Sets the focus to the "magnetic" widget inside the window
@@ -902,7 +918,7 @@ void Manager::freeCapture()
     capture_widget->disableFlags(HAS_CAPTURE);
     capture_widget = NULL;
 
-    m_display->releaseMouse();
+    if (m_display) m_display->releaseMouse();
   }
 }
 
@@ -1283,6 +1299,18 @@ void Manager::pumpQueue()
     // This message is in use
     msg->markAsUsed();
     Message* first_msg = msg;
+
+    // A short press/drag/release can all be queued before the press
+    // handler acquires capture. Resolve its final destination now.
+    if (msg->type() == kMouseDownMessage ||
+        msg->type() == kMouseUpMessage ||
+        msg->type() == kMouseMoveMessage ||
+        msg->type() == kMouseWheelMessage ||
+        msg->type() == kDoubleClickMessage) {
+      const gfx::Point& position = static_cast<MouseMessage*>(msg)->position();
+      _internal_set_mouse_position(position);
+      msg->setLastRecipient(mouseInputTarget(position));
+    }
 
     // Call Timer::tick() if this is a tick message.
     if (msg->type() == kTimerMessage) {

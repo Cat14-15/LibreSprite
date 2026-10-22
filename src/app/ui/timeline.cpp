@@ -65,7 +65,6 @@
 
 // Width of the frames.
 #define FRMSIZE         (frameSize())
-#define ICONSIZE        (MAX(10*guiscale(), 12*guiscale()*m_iconScale/100))
 
 // Height of the layers.
 #define LAYSIZE         (layerSize())
@@ -90,6 +89,7 @@ enum {
   PART_TOP,
   PART_SEPARATOR,
   PART_FRAME_RESIZE,
+  PART_COLUMN_RESIZE,
   PART_HEADER_EYE,
   PART_HEADER_PADLOCK,
   PART_HEADER_CONTINUOUS,
@@ -142,8 +142,9 @@ Timeline::Timeline()
   , m_zoomResetButton("")
   , m_zoomInButton("+")
   , m_timelineScale(100)
-  , m_iconScale(100)
 {
+  for (int& width : m_columnWidths)
+    width = 12*guiscale();
   enableFlags(CTRL_RIGHT_CLICK);
 
   m_ctxConn = m_context->AfterCommandExecution.connect(
@@ -388,11 +389,24 @@ bool Timeline::onProcessMessage(Message* msg)
       // Clicked-part = hot-part.
       m_clk = m_hot;
 
+      if (mouseMsg->left() && activateLayerButton(m_clk)) {
+        cleanClk();
+        invalidate();
+        return true;
+      }
+
       captureMouse();
 
       switch (m_hot.part) {
         case PART_SEPARATOR:
           m_state = STATE_MOVING_SEPARATOR;
+          break;
+        case PART_COLUMN_RESIZE:
+          m_state = STATE_RESIZING_COLUMN;
+          m_resizeColumn = int(m_hot.frame);
+          m_resizeStartX = mouseMsg->position().x;
+          m_resizeColumnWidth = m_columnWidths[m_resizeColumn];
+          m_resizeSeparatorX = m_separator_x;
           break;
         case PART_FRAME_RESIZE:
           m_state = STATE_RESIZING_FRAMES;
@@ -429,6 +443,7 @@ bool Timeline::onProcessMessage(Message* msg)
           bool selectLayer = (mouseMsg->left() || !isLayerActive(m_clk.layer));
 
           if (selectLayer) {
+            m_oldPos = mouseMsg->position();
             m_state = STATE_SELECTING_LAYERS;
             m_range.startRange(m_clk.layer, m_frame, Range::kLayers);
 
@@ -554,12 +569,24 @@ bool Timeline::onProcessMessage(Message* msg)
         // we shouldn't change the hot (so the separator can be
         // tracked to the mouse's released).
         if (m_clk.part == PART_SEPARATOR) {
-          m_separator_x = MID(ICONSIZE*5 + 12*guiscale(),
+          m_separator_x = MID(columnX(5) + 12*guiscale(),
                               mousePos.x,
-                              MAX(ICONSIZE*5 + 12*guiscale(),
+                              MAX(columnX(5) + 12*guiscale(),
                                   bounds().w - 2*FRMSIZE));
           layout();
           updateScrollBars();
+          setViewScroll(viewScroll());
+          invalidate();
+          return true;
+        }
+
+        if (m_state == STATE_RESIZING_COLUMN) {
+          const int delta = static_cast<MouseMessage*>(msg)->position().x-m_resizeStartX;
+          m_columnWidths[m_resizeColumn] = MID(10*guiscale(),
+            m_resizeColumnWidth+delta, 64*guiscale());
+          m_separator_x = MAX(columnX(5)+12*guiscale(),
+            m_resizeSeparatorX+m_columnWidths[m_resizeColumn]-m_resizeColumnWidth);
+          layout();
           setViewScroll(viewScroll());
           invalidate();
           return true;
@@ -572,6 +599,13 @@ bool Timeline::onProcessMessage(Message* msg)
                            gfx::Point(0, 0), false);
           return true;
         }
+      }
+
+      if (hasCapture() && m_state == STATE_SELECTING_LAYERS &&
+          m_clk.part == PART_LAYER_TEXT &&
+          std::abs(static_cast<MouseMessage*>(msg)->position().y-m_oldPos.y) >= 4*guiscale() &&
+          !msg->shiftPressed()) {
+        m_state = STATE_MOVING_RANGE;
       }
 
       updateDropRange(mousePos);
@@ -643,6 +677,7 @@ bool Timeline::onProcessMessage(Message* msg)
           case PART_NOTHING:
           case PART_SEPARATOR:
           case PART_FRAME_RESIZE:
+          case PART_COLUMN_RESIZE:
           case PART_HEADER_LAYER:
             // Do nothing.
             break;
@@ -842,6 +877,7 @@ bool Timeline::onProcessMessage(Message* msg)
       break;
 
     case kDoubleClickMessage:
+      setHot(hitTest(msg, static_cast<MouseMessage*>(msg)->position()-bounds().origin()));
       switch (m_hot.part) {
 
         case PART_LAYER_TEXT: {
@@ -877,6 +913,14 @@ bool Timeline::onProcessMessage(Message* msg)
       bool used = false;
 
       switch (static_cast<KeyMessage*>(msg)->scancode()) {
+
+        case kKeyF2:
+          if (hasFocus() && m_layer) {
+            Command* command = CommandsModule::instance()->getCommandByName(CommandId::LayerProperties);
+            UIContext::instance()->executeCommand(command);
+            return true;
+          }
+          break;
 
         case kKeyEsc:
           if (m_state == STATE_STANDBY) {
@@ -1318,7 +1362,7 @@ void Timeline::setCursor(ui::Message* msg, const Hit& hit)
   else if (hit.part == PART_SEPARATOR) {
     ui::set_mouse_cursor(kSizeWECursor);
   }
-  else if (hit.part == PART_FRAME_RESIZE) {
+  else if (hit.part == PART_FRAME_RESIZE || hit.part == PART_COLUMN_RESIZE) {
     ui::set_mouse_cursor(kSizeWECursor);
   }
   else if (hit.part == PART_FRAME_TAG) {
@@ -1873,23 +1917,23 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
         m_separator_w, bounds.h - y);
 
     case PART_HEADER_EYE:
-      return gfx::Rect(bounds.x, bounds.y + y, ICONSIZE, HDRSIZE);
+      return gfx::Rect(bounds.x, bounds.y + y, m_columnWidths[0], HDRSIZE);
 
     case PART_HEADER_PADLOCK:
-      return gfx::Rect(bounds.x + ICONSIZE, bounds.y + y, ICONSIZE, HDRSIZE);
+      return gfx::Rect(bounds.x + columnX(1), bounds.y + y, m_columnWidths[1], HDRSIZE);
 
     case PART_HEADER_CONTINUOUS:
-      return gfx::Rect(bounds.x + ICONSIZE*2, bounds.y + y, ICONSIZE, HDRSIZE);
+      return gfx::Rect(bounds.x + columnX(2), bounds.y + y, m_columnWidths[2], HDRSIZE);
 
     case PART_HEADER_GEAR:
-      return gfx::Rect(bounds.x + ICONSIZE*3, bounds.y + y, ICONSIZE, HDRSIZE);
+      return gfx::Rect(bounds.x + columnX(3), bounds.y + y, m_columnWidths[3], HDRSIZE);
 
     case PART_HEADER_ONIONSKIN:
-      return gfx::Rect(bounds.x + ICONSIZE*4, bounds.y + y, ICONSIZE, HDRSIZE);
+      return gfx::Rect(bounds.x + columnX(4), bounds.y + y, m_columnWidths[4], HDRSIZE);
 
     case PART_HEADER_LAYER:
-      return gfx::Rect(bounds.x + ICONSIZE*5, bounds.y + y,
-        m_separator_x - ICONSIZE*5, HDRSIZE);
+      return gfx::Rect(bounds.x + columnX(5), bounds.y + y,
+        m_separator_x - columnX(5), HDRSIZE);
 
     case PART_HEADER_FRAME:
       return gfx::Rect(
@@ -1915,29 +1959,29 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
       if (validLayer(hit.layer)) {
         return gfx::Rect(bounds.x,
           bounds.y + y + HDRSIZE + LAYSIZE*(lastLayer()-hit.layer) - viewScroll().y,
-          ICONSIZE, LAYSIZE);
+          m_columnWidths[0], LAYSIZE);
       }
       break;
 
     case PART_LAYER_PADLOCK_ICON:
       if (validLayer(hit.layer)) {
-        return gfx::Rect(bounds.x + ICONSIZE,
+        return gfx::Rect(bounds.x + columnX(1),
           bounds.y + y + HDRSIZE + LAYSIZE*(lastLayer()-hit.layer) - viewScroll().y,
-          ICONSIZE, LAYSIZE);
+          m_columnWidths[1], LAYSIZE);
       }
       break;
 
     case PART_LAYER_CONTINUOUS_ICON:
       if (validLayer(hit.layer)) {
-        return gfx::Rect(bounds.x + 2*ICONSIZE,
+        return gfx::Rect(bounds.x + columnX(2),
           bounds.y + y + HDRSIZE + LAYSIZE*(lastLayer()-hit.layer) - viewScroll().y,
-          ICONSIZE, LAYSIZE);
+          m_columnWidths[2], LAYSIZE);
       }
       break;
 
     case PART_LAYER_TEXT:
       if (validLayer(hit.layer)) {
-        int x = ICONSIZE*3;
+        int x = columnX(3);
         return gfx::Rect(bounds.x + x,
           bounds.y + y + HDRSIZE + LAYSIZE*(lastLayer()-hit.layer) - viewScroll().y,
           m_separator_x - x, LAYSIZE);
@@ -2064,6 +2108,9 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
   else if (m_clk.part == PART_FRAME_RESIZE) {
     hit.part = PART_FRAME_RESIZE;
   }
+  else if (m_clk.part == PART_COLUMN_RESIZE) {
+    hit = m_clk;
+  }
   else {
     gfx::Point scroll = viewScroll();
     int top = topHeight();
@@ -2103,6 +2150,20 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
     else if (mousePos.x > m_separator_x-4*guiscale()
           && mousePos.x <= m_separator_x+2*guiscale())  {
       hit.part = PART_SEPARATOR;
+    }
+    else if (mousePos.y >= top && mousePos.x < m_separator_x &&
+             ([&]() {
+               const int count = (mousePos.y < top+HDRSIZE ? 5: 3);
+               for (int col=0; col<count; ++col) {
+                 if (std::abs(mousePos.x-columnX(col+1)) <= 2*guiscale()) {
+                   hit.part = PART_COLUMN_RESIZE;
+                   hit.frame = frame_t(col);
+                   return true;
+                 }
+               }
+               return false;
+             })()) {
+      // Column dividers take priority over button faces and selections.
     }
     else if (mousePos.y >= top && mousePos.y < top+HDRSIZE &&
              mousePos.x > m_separator_x + m_separator_w + 4*guiscale()) {
@@ -2166,8 +2227,7 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
     }
 
     if (!hasCapture() &&
-        (hit.part == PART_CEL || hit.part == PART_LAYER_TEXT ||
-         hit.part == PART_HEADER_FRAME)) {
+        (hit.part == PART_CEL || hit.part == PART_HEADER_FRAME)) {
       gfx::Rect outline = getPartBounds(Hit(PART_RANGE_OUTLINE));
       if (outline.contains(mousePos)) {
         auto mouseMsg = dynamic_cast<MouseMessage*>(msg);
@@ -2255,6 +2315,9 @@ void Timeline::updateTooltip(const Hit& hit)
       break;
     case PART_FRAME_RESIZE:
       text = "Drag to resize frame cells";
+      break;
+    case PART_COLUMN_RESIZE:
+      text = "Drag to resize this column";
       break;
     case PART_HEADER_EYE:
       text = "Show or hide all layers";
@@ -2782,6 +2845,52 @@ int Timeline::frameSize() const
   return MAX(6*guiscale(), 12*guiscale()*m_timelineScale/100);
 }
 
+int Timeline::columnX(int column) const
+{
+  int x = 0;
+  for (int i=0; i<column; ++i)
+    x += m_columnWidths[i];
+  return x;
+}
+
+bool Timeline::activateLayerButton(const Hit& hit)
+{
+  switch (hit.part) {
+    case PART_HEADER_EYE: {
+      const bool visible = !allLayersVisible();
+      for (Layer* layer : m_layers) layer->setVisible(visible);
+      break;
+    }
+    case PART_HEADER_PADLOCK: {
+      const bool editable = !allLayersUnlocked();
+      for (Layer* layer : m_layers) layer->setEditable(editable);
+      break;
+    }
+    case PART_HEADER_CONTINUOUS: {
+      const bool continuous = !allLayersContinuous();
+      for (Layer* layer : m_layers) layer->setContinuous(continuous);
+      break;
+    }
+    case PART_HEADER_ONIONSKIN:
+      docPref().onionskin.active(!docPref().onionskin.active());
+      break;
+    case PART_LAYER_EYE_ICON:
+    case PART_LAYER_PADLOCK_ICON:
+    case PART_LAYER_CONTINUOUS_ICON: {
+      if (!validLayer(hit.layer)) return false;
+      Layer* layer = m_layers[hit.layer];
+      if (hit.part == PART_LAYER_EYE_ICON) layer->setVisible(!layer->isVisible());
+      else if (hit.part == PART_LAYER_PADLOCK_ICON) layer->setEditable(!layer->isEditable());
+      else layer->setContinuous(!layer->isContinuous());
+      break;
+    }
+    default:
+      return false;
+  }
+  m_document->notifyGeneralUpdate();
+  return true;
+}
+
 int Timeline::layerSize() const
 {
   return 12*guiscale();
@@ -2807,8 +2916,9 @@ void Timeline::setTimelineScale(int scale, const gfx::Point& anchor,
 
   const int newFrameSize = frameSize();
   if (resizeLayerArea) {
-    m_iconScale = scale;
-    const int minSeparator = ICONSIZE*5 + 12*guiscale();
+    for (int& width : m_columnWidths)
+      width = MID(10*guiscale(), width*newFrameSize/oldFrameSize, 64*guiscale());
+    const int minSeparator = columnX(5) + 12*guiscale();
     m_separator_x = MID(minSeparator,
                         oldSeparatorX*newFrameSize/oldFrameSize,
                         MAX(minSeparator, bounds().w-2*newFrameSize));

@@ -331,8 +331,10 @@ bool DocumentView::onProcessMessage(Message* msg)
 
 void DocumentView::onGeneralUpdate(doc::DocumentEvent& ev)
 {
-  if (m_editor->isVisible())
+  if (m_editor->isVisible()) {
     m_editor->updateEditor();
+    m_editor->invalidate();
+  }
 }
 
 void DocumentView::onSpritePixelsModified(doc::DocumentEvent& ev)

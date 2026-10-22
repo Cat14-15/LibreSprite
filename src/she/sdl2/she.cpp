@@ -304,7 +304,6 @@ namespace she {
   class SDL2EventQueue : public EventQueue {
   public:
     PointerType pointerType = PointerType::Mouse;
-    std::chrono::steady_clock::time_point lastUpTime = std::chrono::steady_clock::now();
 
     SDL2EventQueue() {
 #if defined(__EMSCRIPTEN__)
@@ -518,17 +517,15 @@ namespace she {
 	    pointerType = PointerType::Mouse;
 	  }
 
-	  auto now = std::chrono::steady_clock::now();
-	  auto delta = now - lastUpTime;
           if (sdlEvent.type == SDL_MOUSEBUTTONUP) {
-	    using namespace std::chrono_literals;
-	    if (delta < 200ms) {
+	    // SDL tracks button, distance and timing. Two unrelated quick
+	    // clicks must not open a double-click action at the second location.
+	    if (sdlEvent.button.clicks == 2) {
 	      m_events.push(event);
 	      event.setType(Event::MouseDoubleClick);
 	      event.setPosition(event.position());
 	      event.setButton(event.button());
 	    }
-	    lastUpTime = now;
           }
 
           return;
