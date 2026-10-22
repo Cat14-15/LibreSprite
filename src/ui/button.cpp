@@ -162,7 +162,14 @@ bool ButtonBase::onProcessMessage(Message* msg)
     case kKeyUpMessage:
       if (isEnabled()) {
         if (m_behaviorType == kButtonWidget) {
-          if (isSelected()) {
+          KeyMessage* keymsg = static_cast<KeyMessage*>(msg);
+          KeyScancode scancode = keymsg->scancode();
+          bool activationKey = (scancode == kKeyEnter ||
+                                scancode == kKeyEnterPad ||
+                                scancode == kKeySpace ||
+                                (msg->altPressed() && mnemonicChar() &&
+                                 mnemonicChar() == she::scancode_to_ascii(scancode)));
+          if (isSelected() && activationKey) {
             generateButtonSelectSignal();
             return true;
           }
