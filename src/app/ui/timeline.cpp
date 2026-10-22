@@ -183,7 +183,7 @@ Timeline::Timeline()
   m_layerKeyButton.Click.connect([this]{layerKeyMenu();});
   auto keyTips=new TooltipManager;
   m_workflowControls.addChild(keyTips);
-  keyTips->addTooltipFor(&m_keyButton,workflowText("Independent drawing key on this layer; keep following held frames", "현재 레이어에 독립된 그림 키를 만들고 뒤의 유지 구간에 적용합니다"),BOTTOM);
+  keyTips->addTooltipFor(&m_keyButton,workflowText("Insert a new next frame with an independent drawing on this layer", "새 다음 프레임을 만들고 현재 레이어의 그림을 독립 복사합니다"),BOTTOM);
   keyTips->addTooltipFor(&m_holdButton,workflowText("Hold this layer through the selected range, or until its next drawing key", "선택 구간 또는 다음 키 전까지 현재 레이어의 그림을 유지합니다"),BOTTOM);
   keyTips->addTooltipFor(&m_layerKeyButton,workflowText("Blank key and position tween for the current layer", "현재 레이어의 빈 키·그림 유지·두 키 사이 위치 보간"),BOTTOM);
   m_workflowControls.setVisible(false);
@@ -2964,8 +2964,8 @@ void Timeline::createAnimation(bool duplicate) {
 void Timeline::layerKeyMenu() {
   if (!m_document) return;
   Menu menu;
-  std::string names[]={workflowText("Drawing key (independent)","그림 키 추가 (독립 편집)"),workflowText("Blank drawing key","빈 그림 키 추가"),workflowText("Hold drawing through selected frames","선택 프레임 동안 그림 유지"),workflowText("Tween position between selected keys","선택한 두 키 사이 위치 보간")};
-  for (int i=0;i<4;++i) {auto item=new MenuItem(names[i]);item->Click.connect([this,i]{applyLayerKey(i);});menu.addChild(item);}
+  std::string names[]={workflowText("Insert next drawing key","다음 프레임에 그림 키 추가"),workflowText("Insert next blank key","다음 프레임에 빈 그림 키 추가"),workflowText("Hold drawing through selected frames","선택 프레임 동안 그림 유지"),workflowText("Tween position between selected keys","선택한 두 키 사이 위치 보간"),workflowText("Make current drawing independent","현재 프레임 그림만 분리")};
+  for (int i=0;i<5;++i) {auto item=new MenuItem(names[i]);item->Click.connect([this,i]{applyLayerKey(i);});menu.addChild(item);}
   menu.showPopup(gfx::Point(m_layerKeyButton.bounds().x,m_layerKeyButton.bounds().y2()));
 }
 void Timeline::prepareWorkflowEdit() {
@@ -2985,11 +2985,17 @@ void Timeline::applyLayerKey(int action) {
     if (action==2 && !range) {auto key=layer->cel(from);if (!key) throw std::invalid_argument("Select a drawing first.");
       while (to<lastFrame()) {auto next=layer->cel(to+1);if (next && next->dataRef()!=key->dataRef()) break;++to;}}
     if (action==3 && (!range || to-from<2)) throw std::invalid_argument("Select two keys with at least one frame between them.");
+    frame_t inserted=-1;
     {ContextWriter writer(m_context);Transaction tx(m_context,action==3?"Tween layer position":"Edit layer keys");
-      if (action<=1) animation::drawingKey(m_document,tx,layer,m_frame,firstFrame(),lastFrame(),action==1);
+      if (action<=1) inserted=animation::insertLayerKey(m_document,tx,layer,m_frame,firstFrame(),lastFrame(),action==1,selectedAnimation());
+      else if (action==4) animation::drawingKey(m_document,tx,layer,m_frame,firstFrame(),lastFrame(),false);
       else if (action==2) animation::hold(m_document,tx,layer,from,to);
       else animation::tweenPosition(m_document,tx,layer,from,to);
       tx.commit();}
+    if (inserted>=0) {
+      m_range.disableRange();refreshWorkflow();setFrame(inserted,true);
+      updateScrollBars();showCurrentCel();
+    }
     m_document->notifyGeneralUpdate();invalidate();
   } catch (const std::exception& e) {Alert::show("Layer keys<<%s||OK",e.what());}
 }

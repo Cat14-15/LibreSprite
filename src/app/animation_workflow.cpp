@@ -63,6 +63,44 @@ FrameTag* appendClip(Document* document, Transaction& tx, const std::string& req
   tx.execute(new cmd::AddFrameTag(sprite,tag));
   return tag;
 }
+frame_t insertLayerKey(Document* document, Transaction& tx, LayerImage* layer,
+                       frame_t frame, frame_t first, frame_t last, bool blank,
+                       const FrameTag* activeTag) {
+  check(document,layer,first,last);
+  if (frame<first || frame>last)
+    throw std::invalid_argument("The key must be inside the selected animation.");
+  Sprite* sprite=document->sprite();
+  const frame_t next=frame+1;
+  if (!activeTag) activeTag=sprite->frameTags().innerTag(frame);
+  std::vector<std::pair<FrameTag*,std::pair<frame_t,frame_t>>> ranges;
+  for (auto tag:sprite->frameTags()) ranges.push_back({tag,{tag->fromFrame(),tag->toFrame()}});
+  DocumentApi api(document,tx);
+  api.addEmptyFrame(sprite,next);
+  // The new time slot holds every other layer's previous drawing. Existing
+  // later cels shift right intact; they are never overwritten.
+  std::vector<Layer*> layers; sprite->getLayersList(layers);
+  for (Layer* base:layers) {
+    if (!base->isImage()) continue;
+    auto target=static_cast<LayerImage*>(base);
+    if (target==layer && blank) continue;
+    if (target->cel(frame)) api.copyCel(target,frame,target,next,target!=layer);
+  }
+  if (!layer->cel(next)) {
+    ImageRef image(Image::create(sprite->pixelFormat(),sprite->width(),sprite->height()));
+    clear_image(image.get(),sprite->transparentColor());api.addCel(layer,next,image);
+  }
+  api.setFrameDuration(sprite,next,sprite->frameDuration(frame));
+  for (const auto& range:ranges) {
+    auto tag=range.first;frame_t from=range.second.first,to=range.second.second;
+    if (from>=next) {++from;++to;}
+    else if (tag==activeTag || to>=next) ++to;
+    // Only the selected animation grows at its right boundary. Unrelated
+    // tags ending immediately before the inserted slot keep their range.
+    if (tag->fromFrame()!=from || tag->toFrame()!=to)
+      tx.execute(new cmd::SetFrameTagRange(tag,from,to));
+  }
+  return next;
+}
 void drawingKey(Document* document, Transaction& tx, LayerImage* layer, frame_t frame, frame_t first, frame_t last, bool blank) {
   check(document,layer,first,last);
   if (frame<first || frame>last) throw std::invalid_argument("The key must be inside the selected animation.");

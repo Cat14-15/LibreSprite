@@ -23,6 +23,8 @@
 #include "app/document_undo.h"
 #include "app/transaction.h"
 #include "app/cmd/add_frame_tag.h"
+#include "app/cmd/set_frame_tag_range.h"
+#include "app/cmd/set_frame_tag_name.h"
 #include "doc/frame_tag.h"
 #include "doc/frame_tags.h"
 #include "app/document_range.h"
@@ -158,7 +160,7 @@ static int fullUI(const char* executable) {
     }
     const auto bodyData=body->cel(0)->dataRef();
     timeline->setLayer(arm);timeline->setFrame(2,true);repaint();
-    const auto keyPoint=timeline->m_keyButton.bounds().center();down(keyPoint);up(keyPoint);
+    timeline->applyLayerKey(4);
     require(arm->cel(2)->dataRef()!=arm->cel(0)->dataRef(),"actual drawing-key button must unlink the selected layer");
     require(arm->cel(3)->dataRef()==arm->cel(2)->dataRef() && arm->cel(4)->dataRef()==arm->cel(2)->dataRef(),"new key must own the following held drawing segment");
     require(arm->cel(1)->dataRef()==arm->cel(0)->dataRef(),"earlier held frames must remain unchanged");
@@ -178,7 +180,9 @@ static int fullUI(const char* executable) {
     require(arm->cel(0)->x()==0 && arm->cel(4)->x()==8,"position tween must preserve both endpoint keys");
     require(arm->cel(1)->x()==1 && arm->cel(2)->x()==5 && arm->cel(3)->x()==7,"position tween must use frame durations and independent cel data");
     for (int f=0;f<5;++f) require(body->cel(f)->dataRef()==bodyData && body->cel(f)->x()==0,"layer-key edits must leave every other layer unchanged");
-    timeline->m_range.disableRange();timeline->setFrame(3,true);timeline->applyLayerKey(1);
+    timeline->m_range.disableRange();timeline->setFrame(3,true);
+    {app::ContextWriter writer(app::UIContext::instance());app::Transaction tx(app::UIContext::instance(),"Blank current key test");
+      app::animation::drawingKey(document,tx,arm,3,0,4,true);tx.commit();}
     require(arm->cel(3)->image()->getPixel(0,0)==0,"blank key must create an explicit transparent drawing");
     document->undoHistory()->undo();
     require(arm->cel(3)->x()==7,"blank-key Undo must restore the previous drawing and position");
@@ -218,6 +222,42 @@ static int fullUI(const char* executable) {
     require(createdFromDialog && sprite->frameTags().getByName("attack"),"actual creation dialog must create the requested animation");
     require(timeline->firstFrame()==13 && timeline->lastFrame()==15,"creation dialog must activate only the new animation");
 
+
+    // Exact user case: the Hammer_Attack_1 range ends at displayed frame 15,
+    // with another animation after it. Add must create 16, then 17, not rewrite 15.
+    doc::FrameTag* hammer=sprite->frameTags().getByName("attack");
+    doc::FrameTag* nextAnimation;
+    {
+      app::ContextWriter writer(app::UIContext::instance());app::Transaction tx(app::UIContext::instance(),"Hammer insertion fixture");app::DocumentApi api(document,tx);
+      api.addEmptyFrame(sprite,16);api.addEmptyFrame(sprite,17);
+      tx.execute(new app::cmd::SetFrameTagRange(hammer,13,14));
+      tx.execute(new app::cmd::SetFrameTagName(hammer,"Hammer_Attack_1"));
+      nextAnimation=new doc::FrameTag(15,17);nextAnimation->setName("Next");tx.execute(new app::cmd::AddFrameTag(sprite,nextAnimation));tx.commit();
+    }
+    timeline->selectAnimation(hammer->id());timeline->setLayer(arm);timeline->setFrame(14,true);repaint();
+    std::vector<doc::CelDataRef> armBefore,bodyBefore;
+    for (int f=0;f<18;++f) {armBefore.push_back(arm->cel(f)?arm->cel(f)->dataRef():doc::CelDataRef());bodyBefore.push_back(body->cel(f)?body->cel(f)->dataRef():doc::CelDataRef());}
+    const auto addKey=timeline->m_keyButton.bounds().center();down(addKey);up(addKey);
+    require(sprite->totalFrames()==19 && timeline->getFrame()==15 && hammer->toFrame()==15,"Add Drawing Key at displayed 15 must insert and select displayed 16 inside Hammer_Attack_1");
+    require(arm->cel(14)->dataRef()==armBefore[14] && arm->cel(15)->dataRef()!=armBefore[14],"frame 15 must be preserved and frame 16 must be independent");
+    require(body->cel(15)->dataRef()==bodyBefore[14],"other layers must hold the previous drawing in the new time slot");
+    for (int f=0;f<18;++f) {
+      const int dest=f<15?f:f+1;
+      require((arm->cel(dest)?arm->cel(dest)->dataRef():doc::CelDataRef())==armBefore[f],"existing selected-layer cels must shift intact, never be overwritten");
+      require((body->cel(dest)?body->cel(dest)->dataRef():doc::CelDataRef())==bodyBefore[f],"existing other-layer cels must shift intact");
+    }
+    require(nextAnimation->fromFrame()==16 && nextAnimation->toFrame()==18 && idle->toFrame()==4,"later animation tags must move right without extending earlier animations");
+    down(addKey);up(addKey);
+    require(sprite->totalFrames()==20 && timeline->getFrame()==16 && hammer->toFrame()==16,"a second Add must advance to displayed frame 17");
+    const auto prior=arm->cel(16)->dataRef();
+    timeline->applyLayerKey(1);
+    require(sprite->totalFrames()==21 && timeline->getFrame()==17 && hammer->toFrame()==17,"Add Blank Key must insert and select displayed frame 18");
+    require(arm->cel(17)->image()->getPixel(0,0)==0 && arm->cel(16)->dataRef()==prior,"blank insertion must not clear the previous key");
+    document->undoHistory()->undo();document->undoHistory()->undo();document->undoHistory()->undo();
+    require(sprite->totalFrames()==18 && hammer->toFrame()==14 && nextAnimation->fromFrame()==15,"three Undos must restore all inserted slots and tag ranges");
+    timeline->selectAnimation(hammer->id());timeline->setLayer(arm);timeline->setFrame(14,true);repaint();
+    std::cerr << "CHECK: actual Add advances 15 -> 16 -> 17, blank adds 18; earlier drawings, other layers and following animation preserved; Undo restores slots\n";
+
     // User regression: a floating selection owns a reader, so taking a new
     // writer directly used to show "Cannot modify the sprite" on Drawing Key.
     timeline->setLayer(arm);timeline->setFrame(timeline->lastFrame(),true);
@@ -242,7 +282,7 @@ static int fullUI(const char* executable) {
     for (int y=0;y<drawing->height();++y) for (int x=0;x<drawing->width();++x)
       if (drawing->getPixel(x,y)==doc::rgba(0,255,0,255)) greenPreserved=true;
     require(greenPreserved,"creating a key must preserve the user's floating pixels");
-    require(sprite->totalFrames()==frameCount && body->cel(keyFrame)->dataRef()==untouchedBody,"drawing key must not add global frames or modify other layers");
+    require(sprite->totalFrames()==frameCount+1 && body->cel(keyFrame)->dataRef()==untouchedBody,"new key must add one time slot while holding other layers unchanged");
     std::cerr << "CHECK: floating-selection writer conflict reproduced; real key-button click commits pixels and creates independent final key\n";
 
     if (const char* path=std::getenv("LIBRESPRITE_WORKFLOW_SCREENSHOT")) {
