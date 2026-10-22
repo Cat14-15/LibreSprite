@@ -428,7 +428,7 @@ private:
   }
 
   void onLocateConfigFile() {
-    app::launcher::open_folder(app::main_config_filename());
+    app::launcher::open_folder(base::get_file_path(app::main_config_filename()));
   }
 
   void loadThemes() {

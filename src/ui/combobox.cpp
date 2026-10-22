@@ -354,10 +354,10 @@ bool ComboBox::onProcessMessage(Message* msg)
 
     case kMouseDownMessage:
       if (m_window) {
-        if (!View::getView(m_listbox)->hasMouse()) {
+        MouseMessage* mouseMsg = static_cast<MouseMessage*>(msg);
+        if (!m_window->bounds().contains(mouseMsg->position())) {
           closeListBox();
 
-          MouseMessage* mouseMsg = static_cast<MouseMessage*>(msg);
           Widget* pick = manager()->pick(mouseMsg->position());
           return (pick && pick->hasAncestor(this) ? true: false);
         }
