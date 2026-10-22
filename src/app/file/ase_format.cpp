@@ -1166,7 +1166,8 @@ static Cel* ase_file_read_cel_chunk(FILE* f, Sprite* sprite, frame_t frame,
   int cel_type = fgetw(f);
   Layer* layer;
 
-  ase_file_read_padding(f, 7);
+  const int zIndex = static_cast<short>(fgetw(f));
+  ase_file_read_padding(f, 5);
 
   layer = sprite->indexToLayer(layer_index);
   if (!layer) {
@@ -1280,8 +1281,10 @@ static Cel* ase_file_read_cel_chunk(FILE* f, Sprite* sprite, frame_t frame,
 
   }
 
-  if (cel)
+  if (cel) {
+    cel->setZIndex(zIndex);
     static_cast<LayerImage*>(layer)->addCel(cel);
+  }
 
   return cel.get();
 }
@@ -1300,7 +1303,8 @@ static void ase_file_write_cel_chunk(FILE* f, ASE_FrameHeader* frame_header,
   fputw(cel->y(), f);
   fputc(cel->opacity(), f);
   fputw(cel_type, f);
-  ase_file_write_padding(f, 7);
+  fputw(cel->zIndex(), f);
+  ase_file_write_padding(f, 5);
 
   switch (cel_type) {
 

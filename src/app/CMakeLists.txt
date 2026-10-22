@@ -135,6 +135,7 @@ add_library(app-lib
   cmd/set_cel_data.cpp
   cmd/set_cel_frame.cpp
   cmd/set_cel_opacity.cpp
+  cmd/set_cel_z_index.cpp
   cmd/set_cel_position.cpp
   cmd/set_frame_duration.cpp
   cmd/set_frame_tag_anidir.cpp

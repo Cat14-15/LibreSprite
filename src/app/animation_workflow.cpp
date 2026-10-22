@@ -5,6 +5,8 @@
 #include "app/cmd/add_frame_tag.h"
 #include "app/cmd/remove_cel.h"
 #include "app/cmd/set_frame_tag_range.h"
+#include "app/cmd/set_cel_frame.h"
+#include "app/cmd/set_cel_z_index.h"
 #include "app/cmd/unlink_cel.h"
 #include "doc/cel.h"
 #include "doc/frame_tag.h"
@@ -55,6 +57,8 @@ FrameTag* appendClip(Document* document, Transaction& tx, const std::string& req
       auto it=keys.find(cel->data()->id());
       if (it==keys.end()) { api.copyCel(layer,sf,layer,start+f,false);keys[cel->data()->id()]=start+f; }
       else api.copyCel(layer,it->second,layer,start+f,true);
+      if (layer->cel(start+f)->zIndex()!=cel->zIndex())
+        tx.execute(new cmd::SetCelZIndex(layer->cel(start+f),cel->zIndex()));
     }
   }
   for (int f=0;f<count;++f) api.setFrameDuration(sprite,start+f,source?sprite->frameDuration(sourceFirst+f):ms);
@@ -72,33 +76,41 @@ frame_t insertLayerKey(Document* document, Transaction& tx, LayerImage* layer,
   Sprite* sprite=document->sprite();
   const frame_t next=frame+1;
   if (!activeTag) activeTag=sprite->frameTags().innerTag(frame);
-  std::vector<std::pair<FrameTag*,std::pair<frame_t,frame_t>>> ranges;
-  for (auto tag:sprite->frameTags()) ranges.push_back({tag,{tag->fromFrame(),tag->toFrame()}});
   DocumentApi api(document,tx);
-  api.addEmptyFrame(sprite,next);
-  // The new time slot holds every other layer's previous drawing. Existing
-  // later cels shift right intact; they are never overwritten.
-  std::vector<Layer*> layers; sprite->getLayersList(layers);
-  for (Layer* base:layers) {
-    if (!base->isImage()) continue;
-    auto target=static_cast<LayerImage*>(base);
-    if (target==layer && blank) continue;
-    if (target->cel(frame)) api.copyCel(target,frame,target,next,target!=layer);
+  // Insert on this track only. Reuse the existing clip's empty tail slot.
+  // Grow global time ONLY at the clip boundary if its tail is occupied.
+  const bool grow = next>last || layer->cel(last)!=nullptr;
+  if (grow) {
+    const frame_t boundary=last+1;
+    std::vector<std::pair<FrameTag*,std::pair<frame_t,frame_t>>> ranges;
+    for (auto tag:sprite->frameTags()) ranges.push_back({tag,{tag->fromFrame(),tag->toFrame()}});
+    api.addEmptyFrame(sprite,boundary);
+    std::vector<Layer*> layers;sprite->getLayersList(layers);
+    for (Layer* base:layers) {
+      if (!base->isImage() || base==layer) continue;
+      auto target=static_cast<LayerImage*>(base);
+      if (target->cel(last)) api.copyCel(target,last,target,boundary,true);
+    }
+    api.setFrameDuration(sprite,boundary,sprite->frameDuration(last));
+    for (const auto& range:ranges) {
+      auto tag=range.first;frame_t from=range.second.first,to=range.second.second;
+      if (from>=boundary) {++from;++to;}
+      else if (tag==activeTag || to>=boundary) ++to;
+      if (tag->fromFrame()!=from || tag->toFrame()!=to)
+        tx.execute(new cmd::SetFrameTagRange(tag,from,to));
+    }
   }
-  if (!layer->cel(next)) {
+  // Descend to keep every original cel (including linked data and z-order)
+  // intact. Other tracks keep their original times throughout this clip.
+  for (frame_t f=grow?last:last-1;f>=next;--f)
+    if (auto cel=layer->cel(f)) tx.execute(new cmd::SetCelFrame(cel,f+1));
+  if (!blank && layer->cel(frame)) api.copyCel(layer,frame,layer,next,false);
+  else {
     ImageRef image(Image::create(sprite->pixelFormat(),sprite->width(),sprite->height()));
     clear_image(image.get(),sprite->transparentColor());api.addCel(layer,next,image);
   }
-  api.setFrameDuration(sprite,next,sprite->frameDuration(frame));
-  for (const auto& range:ranges) {
-    auto tag=range.first;frame_t from=range.second.first,to=range.second.second;
-    if (from>=next) {++from;++to;}
-    else if (tag==activeTag || to>=next) ++to;
-    // Only the selected animation grows at its right boundary. Unrelated
-    // tags ending immediately before the inserted slot keep their range.
-    if (tag->fromFrame()!=from || tag->toFrame()!=to)
-      tx.execute(new cmd::SetFrameTagRange(tag,from,to));
-  }
+  if (blank && layer->cel(frame))
+    tx.execute(new cmd::SetCelZIndex(layer->cel(next),layer->cel(frame)->zIndex()));
   return next;
 }
 void drawingKey(Document* document, Transaction& tx, LayerImage* layer, frame_t frame, frame_t first, frame_t last, bool blank) {
@@ -107,6 +119,7 @@ void drawingKey(Document* document, Transaction& tx, LayerImage* layer, frame_t 
   DocumentApi api(document,tx);
   auto old=layer->cel(frame);
   const auto oldData=old?old->dataRef():CelDataRef();
+  const int oldZ=old?old->zIndex():0;
   frame_t end=frame;
   while (end<last) {
     auto next=layer->cel(end+1);
@@ -130,13 +143,22 @@ void drawingKey(Document* document, Transaction& tx, LayerImage* layer, frame_t 
       clear_image(image.get(),document->sprite()->transparentColor());api.addCel(layer,frame,image);
     }
   }
-  for (frame_t f=frame+1;f<=end;++f) api.copyCel(layer,frame,layer,f,true);
+  if (blank && layer->cel(frame)) tx.execute(new cmd::SetCelZIndex(layer->cel(frame),oldZ));
+  for (frame_t f=frame+1;f<=end;++f) {
+    const int z=layer->cel(f)?layer->cel(f)->zIndex():0;
+    api.copyCel(layer,frame,layer,f,true);
+    tx.execute(new cmd::SetCelZIndex(layer->cel(f),z));
+  }
 }
 void hold(Document* document, Transaction& tx, LayerImage* layer, frame_t from, frame_t to) {
   check(document,layer,from,to);
   if (!layer->cel(from)) throw std::invalid_argument("The first selected frame needs a drawing.");
   DocumentApi api(document,tx);
-  for (frame_t f=from+1;f<=to;++f) api.copyCel(layer,from,layer,f,true);
+  for (frame_t f=from+1;f<=to;++f) {
+    const int z=layer->cel(f)?layer->cel(f)->zIndex():layer->cel(from)->zIndex();
+    api.copyCel(layer,from,layer,f,true);
+    tx.execute(new cmd::SetCelZIndex(layer->cel(f),z));
+  }
 }
 void tweenPosition(Document* document, Transaction& tx, LayerImage* layer, frame_t from, frame_t to) {
   check(document,layer,from,to);
@@ -149,7 +171,9 @@ void tweenPosition(Document* document, Transaction& tx, LayerImage* layer, frame
   for (frame_t f=from+1;f<to;++f) {
     elapsed+=document->sprite()->frameDuration(f-1);
     // Cel position belongs to shared CelData: independent copies are essential.
+    const int z=layer->cel(f)?layer->cel(f)->zIndex():first->zIndex();
     api.copyCel(layer,from,layer,f,false);
+    tx.execute(new cmd::SetCelZIndex(layer->cel(f),z));
     api.setCelPosition(document->sprite(),layer->cel(f),int(std::lround(x1+(x2-x1)*elapsed/total)),int(std::lround(y1+(y2-y1)*elapsed/total)));
   }
 }

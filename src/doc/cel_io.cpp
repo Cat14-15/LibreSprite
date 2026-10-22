@@ -27,9 +27,10 @@ void write_cel(std::ostream& os, const Cel* cel)
   write32(os, cel->id());
   write16(os, cel->frame());
   write32(os, cel->dataRef()->id());
+  write16(os, cel->zIndex());
 }
 
-Cel* read_cel(std::istream& is, SubObjectsIO* subObjects, bool setId)
+Cel* read_cel(std::istream& is, SubObjectsIO* subObjects, bool setId, bool readZIndex)
 {
   ObjectId id = read32(is);
   frame_t frame(read16(is));
@@ -39,6 +40,7 @@ Cel* read_cel(std::istream& is, SubObjectsIO* subObjects, bool setId)
     return nullptr;
 
   std::unique_ptr<Cel> cel(new Cel(frame, celData));
+  if (readZIndex) cel->setZIndex(static_cast<short>(read16(is)));
   if (setId)
     cel->setId(id);
   return cel.release();

@@ -311,7 +311,11 @@ private:
   }
 
   Cel* readCel(std::ifstream& s) {
-    return read_cel(s, this, false);
+    // Old recovery records end after CelData id; new records append z-index.
+    auto cel = read_cel(s, this, false, false);
+    if (cel && s.peek() != std::char_traits<char>::eof())
+      cel->setZIndex(static_cast<short>(read16(s)));
+    return cel;
   }
 
   CelData* readCelData(std::ifstream& s) {

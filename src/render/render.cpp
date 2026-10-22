@@ -18,6 +18,9 @@
 #include "doc/image_impl.h"
 #include "gfx/clip.h"
 #include "gfx/region.h"
+#include <algorithm>
+#include <functional>
+#include <vector>
 
 namespace render {
 
@@ -941,16 +944,34 @@ void Render::renderLayer(
     }
 
     case ObjectType::LayerFolder: {
-      LayerConstIterator it = static_cast<const LayerFolder*>(layer)->getLayerBegin();
-      LayerConstIterator end = static_cast<const LayerFolder*>(layer)->getLayerEnd();
-
-      for (; it != end; ++it) {
-        renderLayer(*it, image,
-          area, frame, zoom, compositeImage,
-          render_background,
-          render_transparent,
-          blendMode);
-      }
+      // Groups in this renderer are visibility containers. Flatten visible
+      // image layers before sorting so every image cel can cross group boundaries.
+      struct Item { const Layer* layer; int index; int z; };
+      std::vector<Item> plan;
+      int index = 0;
+      std::function<void(const Layer*, bool)> collect = [&](const Layer* child, bool visible) {
+        const int order = index++;
+        visible = visible && child->isVisible();
+        if (child->isFolder()) {
+          auto folder = static_cast<const LayerFolder*>(child);
+          for (auto it=folder->getLayerBegin(); it!=folder->getLayerEnd(); ++it)
+            collect(*it, visible);
+        }
+        else if (visible) {
+          auto cel = child->cel(frame);
+          plan.push_back({child, order, cel ? cel->zIndex() : 0});
+        }
+      };
+      auto folder = static_cast<const LayerFolder*>(layer);
+      for (auto it=folder->getLayerBegin(); it!=folder->getLayerEnd(); ++it) collect(*it, true);
+      // ASE cel z-index ordering: layer index + offset, ties by offset.
+      std::stable_sort(plan.begin(), plan.end(), [](const Item& a, const Item& b) {
+        return a.index+a.z < b.index+b.z ||
+          (a.index+a.z == b.index+b.z && a.z < b.z);
+      });
+      for (const auto& item : plan)
+        renderLayer(item.layer, image, area, frame, zoom, compositeImage,
+                    render_background, render_transparent, blendMode);
       break;
     }
 

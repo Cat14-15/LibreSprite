@@ -39,13 +39,16 @@ std::shared_ptr<Cel> Cel::createCopy(std::shared_ptr<const Cel> other)
   auto cel = std::make_shared<Cel>(other->frame(), ImageRef(Image::createCopy(other->image())));
   cel->setPosition(other->position());
   cel->setOpacity(other->opacity());
+  cel->setZIndex(other->zIndex());
   return cel;
 }
 
 // static
 std::shared_ptr<Cel> Cel::createLink(std::shared_ptr<const Cel> other)
 {
-  return std::make_shared<Cel>(other->frame(), other->dataRef());
+  auto cel = std::make_shared<Cel>(other->frame(), other->dataRef());
+  cel->setZIndex(other->zIndex());
+  return cel;
 }
 
 void Cel::setFrame(frame_t frame)

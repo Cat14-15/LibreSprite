@@ -73,6 +73,7 @@ std::shared_ptr<Cel> create_cel_copy(std::shared_ptr<const Cel> srcCel,
 
   dstCel->setPosition(srcCel->position());
   dstCel->setOpacity(srcCel->opacity());
+  dstCel->setZIndex(srcCel->zIndex());
   dstCel->data()->setUserData(srcCel->data()->userData());
 
   return dstCel;

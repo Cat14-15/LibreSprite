@@ -34,6 +34,8 @@ namespace doc {
     int y() const { return m_data->position().y; }
     const gfx::Point& position() const { return m_data->position(); }
     int opacity() const { return m_data->opacity(); }
+    int zIndex() const { return m_zIndex; }
+    void setZIndex(int z) { m_zIndex = z; }
 
     LayerImage* layer() const { return m_layer; }
     Image* image() const { return m_data->image(); }
@@ -65,6 +67,7 @@ namespace doc {
     void fixupImage();
 
     LayerImage* m_layer;
+    int m_zIndex = 0;          // Per-frame order, independent of linked image data
     frame_t m_frame;            // Frame position
     CelDataRef m_data;
 

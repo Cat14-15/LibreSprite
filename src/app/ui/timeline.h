@@ -263,6 +263,8 @@ namespace app {
     void animationMenu();
     void createAnimation(bool duplicate);
     void layerKeyMenu();
+    void celOrderMenu();
+    void applyCelOrder(int action);
     void applyLayerKey(int action);
     void prepareWorkflowEdit();
     int workflowHeight() const;
@@ -329,6 +331,7 @@ namespace app {
     ui::Button m_keyButton;
     ui::Button m_holdButton;
     ui::Button m_layerKeyButton;
+    ui::Button m_orderButton;
     ObjectId m_animationId = NullId;
     bool m_updatingWorkflow = false;
     std::vector<ObjectId> m_animationIds;

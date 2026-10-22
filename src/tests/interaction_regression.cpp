@@ -18,11 +18,14 @@
 #include "app/context.h"
 #include "app/document.h"
 #include "app/animation_workflow.h"
+#include "app/file/file.h"
+#include "app/cmd/set_cel_z_index.h"
 #include "app/context_access.h"
 #include "app/document_api.h"
 #include "app/document_undo.h"
 #include "app/transaction.h"
 #include "app/cmd/add_frame_tag.h"
+#include "app/cmd/remove_cel.h"
 #include "app/cmd/set_frame_tag_range.h"
 #include "app/cmd/set_frame_tag_name.h"
 #include "doc/frame_tag.h"
@@ -223,40 +226,76 @@ static int fullUI(const char* executable) {
     require(timeline->firstFrame()==13 && timeline->lastFrame()==15,"creation dialog must activate only the new animation");
 
 
-    // Exact user case: the Hammer_Attack_1 range ends at displayed frame 15,
-    // with another animation after it. Add must create 16, then 17, not rewrite 15.
-    doc::FrameTag* hammer=sprite->frameTags().getByName("attack");
-    doc::FrameTag* nextAnimation;
-    {
-      app::ContextWriter writer(app::UIContext::instance());app::Transaction tx(app::UIContext::instance(),"Hammer insertion fixture");app::DocumentApi api(document,tx);
-      api.addEmptyFrame(sprite,16);api.addEmptyFrame(sprite,17);
-      tx.execute(new app::cmd::SetFrameTagRange(hammer,13,14));
-      tx.execute(new app::cmd::SetFrameTagName(hammer,"Hammer_Attack_1"));
-      nextAnimation=new doc::FrameTag(15,17);nextAnimation->setName("Next");tx.execute(new app::cmd::AddFrameTag(sprite,nextAnimation));tx.commit();
-    }
-    timeline->selectAnimation(hammer->id());timeline->setLayer(arm);timeline->setFrame(14,true);repaint();
+    // Frame-local rendering order is independent even on linked images.
+    timeline->selectAnimation(doc::NullId);
+    arm->setVisible(true);body->setVisible(true);
+    timeline->setLayer(body);timeline->setFrame(1,true);repaint();
+    bool orderClicked=false;
+    ui::Timer orderAuthor(10,manager);
+    orderAuthor.Tick.connect([&]{
+      auto item=manager->findChild("celOrder2");if (!item) return;
+      orderAuthor.stop();down(item->bounds().center());up(item->bounds().center());orderClicked=true;
+    });
+    orderAuthor.start();down(timeline->m_orderButton.bounds().center());up(timeline->m_orderButton.bounds().center());orderAuthor.stop();
+    require(orderClicked && body->cel(1)->zIndex()>0 && body->cel(0)->zIndex()==0,"actual Order menu must change only the selected frame, including linked cels");
+    render::Render orderRenderer;doc::ImageRef orderImage(doc::Image::create(doc::IMAGE_RGB,8,8));
+    orderRenderer.renderSprite(orderImage.get(),sprite,0);
+    require(orderImage->getPixel(2,2)==doc::rgba(255,0,0,255),"default frame must render top red layer in front");
+    orderRenderer.renderSprite(orderImage.get(),sprite,1);
+    require(orderImage->getPixel(2,2)==doc::rgba(0,0,255,255),"changed frame must render linked blue lower layer in front");
+    document->undoHistory()->undo();require(body->cel(1)->zIndex()==0,"Undo must restore frame order");
+    document->undoHistory()->redo();require(body->cel(1)->zIndex()>0,"Redo must restore frame order");
+    timeline->applyCelOrder(3);orderRenderer.renderSprite(orderImage.get(),sprite,1);
+    require(orderImage->getPixel(2,2)==doc::rgba(255,0,0,255),"send to back must render behind again");
+    timeline->applyCelOrder(0);orderRenderer.renderSprite(orderImage.get(),sprite,1);
+    require(orderImage->getPixel(2,2)==doc::rgba(0,0,255,255),"one step forward must cross the next actual layer even after send to back");
+    timeline->applyCelOrder(1);orderRenderer.renderSprite(orderImage.get(),sprite,1);
+    require(orderImage->getPixel(2,2)==doc::rgba(255,0,0,255),"one step backward must cross the previous actual layer");
+    timeline->applyCelOrder(4);require(body->cel(1)->zIndex()==0,"reset must restore native layer ordering");
+    // Save positive and negative offsets on linked cels and read actual ASE file.
+    timeline->applyCelOrder(2);timeline->setFrame(2,true);timeline->applyCelOrder(3);
+    const std::string orderPath=std::string(std::getenv("APPDATA"))+"/frame-order.ase";
+    {std::unique_ptr<app::FileOp> save(app::FileOp::createSaveDocumentOperation(app::UIContext::instance(),document,orderPath.c_str(),nullptr));
+      save->operate();require(!save->hasError(),"ASE save with frame order must succeed");}
+    {std::unique_ptr<app::Document> loaded(app::load_document(app::UIContext::instance(),orderPath.c_str()));
+      require(loaded.get()!=nullptr,"ASE with cel order must reload");
+      auto saved=loaded->sprite()->indexToLayer(sprite->layerToIndex(body));
+      require(saved->cel(0)->zIndex()==0 && saved->cel(1)->zIndex()==body->cel(1)->zIndex() && saved->cel(2)->zIndex()==body->cel(2)->zIndex(),"ASE must preserve signed order on each linked cel");
+      orderRenderer.renderSprite(orderImage.get(),loaded->sprite(),1);
+      require(orderImage->getPixel(2,2)==doc::rgba(0,0,255,255),"reloaded ASE must render the same front layer");}
+    std::cerr << "CHECK: actual frame order menu, positive/negative z, linked cel independence, canvas render, Undo/Redo and ASE save/reload passed\n";
+
+    // Add inside an existing animation shifts ONLY selected track's tail.
+    timeline->selectAnimation(walk->id());timeline->setLayer(arm);timeline->setFrame(5,true);repaint();
     std::vector<doc::CelDataRef> armBefore,bodyBefore;
-    for (int f=0;f<18;++f) {armBefore.push_back(arm->cel(f)?arm->cel(f)->dataRef():doc::CelDataRef());bodyBefore.push_back(body->cel(f)?body->cel(f)->dataRef():doc::CelDataRef());}
-    const auto addKey=timeline->m_keyButton.bounds().center();down(addKey);up(addKey);
-    require(sprite->totalFrames()==19 && timeline->getFrame()==15 && hammer->toFrame()==15,"Add Drawing Key at displayed 15 must insert and select displayed 16 inside Hammer_Attack_1");
-    require(arm->cel(14)->dataRef()==armBefore[14] && arm->cel(15)->dataRef()!=armBefore[14],"frame 15 must be preserved and frame 16 must be independent");
-    require(body->cel(15)->dataRef()==bodyBefore[14],"other layers must hold the previous drawing in the new time slot");
-    for (int f=0;f<18;++f) {
-      const int dest=f<15?f:f+1;
-      require((arm->cel(dest)?arm->cel(dest)->dataRef():doc::CelDataRef())==armBefore[f],"existing selected-layer cels must shift intact, never be overwritten");
-      require((body->cel(dest)?body->cel(dest)->dataRef():doc::CelDataRef())==bodyBefore[f],"existing other-layer cels must shift intact");
+    for (int f=0;f<sprite->totalFrames();++f) {armBefore.push_back(arm->cel(f)?arm->cel(f)->dataRef():doc::CelDataRef());bodyBefore.push_back(body->cel(f)?body->cel(f)->dataRef():doc::CelDataRef());}
+    const int countBefore=sprite->totalFrames();const auto addKey=timeline->m_keyButton.bounds().center();down(addKey);up(addKey);
+    require(sprite->totalFrames()==countBefore+1 && timeline->getFrame()==6 && walk->toFrame()==9,"occupied clip tail must grow only at its boundary");
+    require(arm->cel(5)->dataRef()==armBefore[5] && arm->cel(6)->dataRef()!=armBefore[5],"inserted selected-layer key must be independent");
+    for (int f=6;f<=8;++f) {
+      require(body->cel(f)->dataRef()==bodyBefore[f],"other-layer key times inside the clip must not move");
+      require(arm->cel(f+1)->dataRef()==armBefore[f],"only selected track tail must shift right intact");
     }
-    require(nextAnimation->fromFrame()==16 && nextAnimation->toFrame()==18 && idle->toFrame()==4,"later animation tags must move right without extending earlier animations");
-    down(addKey);up(addKey);
-    require(sprite->totalFrames()==20 && timeline->getFrame()==16 && hammer->toFrame()==16,"a second Add must advance to displayed frame 17");
-    const auto prior=arm->cel(16)->dataRef();
-    timeline->applyLayerKey(1);
-    require(sprite->totalFrames()==21 && timeline->getFrame()==17 && hammer->toFrame()==17,"Add Blank Key must insert and select displayed frame 18");
-    require(arm->cel(17)->image()->getPixel(0,0)==0 && arm->cel(16)->dataRef()==prior,"blank insertion must not clear the previous key");
-    document->undoHistory()->undo();document->undoHistory()->undo();document->undoHistory()->undo();
-    require(sprite->totalFrames()==18 && hammer->toFrame()==14 && nextAnimation->fromFrame()==15,"three Undos must restore all inserted slots and tag ranges");
-    timeline->selectAnimation(hammer->id());timeline->setLayer(arm);timeline->setFrame(14,true);repaint();
-    std::cerr << "CHECK: actual Add advances 15 -> 16 -> 17, blank adds 18; earlier drawings, other layers and following animation preserved; Undo restores slots\n";
+    require(copy->fromFrame()==10 && idle->toFrame()==4,"following clips shift at the boundary, earlier clips stay intact");
+    require(body->cel(9)->dataRef()==bodyBefore[8],"new boundary holds the other layer's final pose");
+    document->undoHistory()->undo();
+    require(sprite->totalFrames()==countBefore && walk->toFrame()==8 && copy->fromFrame()==9,"Undo must restore local shift and boundary expansion together");
+    for (int f=0;f<countBefore;++f) {
+      require((arm->cel(f)?arm->cel(f)->dataRef():doc::CelDataRef())==armBefore[f],"Undo must preserve all original selected-track cels");
+      require((body->cel(f)?body->cel(f)->dataRef():doc::CelDataRef())==bodyBefore[f],"Undo must preserve all other-track cels");
+    }
+    // With a free tail there must be no global frame or tag insertion.
+    {app::ContextWriter writer(app::UIContext::instance());app::Transaction tx(app::UIContext::instance(),"Empty tail fixture");
+      tx.execute(new app::cmd::RemoveCel(arm->cel(8)));tx.commit();}
+    timeline->setFrame(5,true);down(addKey);up(addKey);
+    require(sprite->totalFrames()==countBefore && walk->toFrame()==8 && copy->fromFrame()==9,"free tail slot must avoid ANY global frame/tag insertion");
+    for (int f=6;f<=8;++f) require(body->cel(f)->dataRef()==bodyBefore[f],"free-tail insertion must leave other tracks untouched");
+    document->undoHistory()->undo();document->undoHistory()->undo();
+    timeline->setFrame(5,true);timeline->applyLayerKey(1);
+    require(arm->cel(6)->image()->getPixel(0,0)==0 && arm->cel(5)->dataRef()==armBefore[5],"blank insertion must preserve preceding drawing");
+    document->undoHistory()->undo();
+    std::cerr << "CHECK: selected-track-only shift, empty-tail reuse, boundary expansion, later-clip preservation, blank insertion and Undo passed\n";
+    auto hammer=sprite->frameTags().getByName("attack");timeline->selectAnimation(hammer->id());
 
     // User regression: a floating selection owns a reader, so taking a new
     // writer directly used to show "Cannot modify the sprite" on Drawing Key.
@@ -394,6 +433,22 @@ int app_main(int argc, char** argv) {
       layer->cel(doc::frame_t(0))->image(), gfx::Point(0,0), doc::BlendMode::NORMAL);
     renderer.renderSprite(output.get(), sprite.get(), doc::frame_t(0));
     require(doc::rgba_geta(output->getPixel(0,0)) == 0, "all hidden layers must clear the rendered image");
+    // Global per-cel order also works through groups, without unhiding them.
+    {
+      std::unique_ptr<doc::Sprite> grouped(doc::Sprite::createBasicSprite(doc::IMAGE_RGB,2,2,2));
+      auto bottom=grouped->folder()->getFirstLayer();
+      doc::clear_image(bottom->cel(0)->image(),doc::rgba(255,0,0,255));
+      auto folder=new doc::LayerFolder(grouped.get());grouped->folder()->addLayer(folder);
+      auto top=new doc::LayerImage(grouped.get());folder->addLayer(top);
+      doc::ImageRef blue(doc::Image::create(doc::IMAGE_RGB,2,2));doc::clear_image(blue.get(),doc::rgba(0,0,255,255));
+      auto cel=std::make_shared<doc::Cel>(0,blue);top->addCel(cel);
+      render::Render groupRenderer;groupRenderer.renderSprite(output.get(),grouped.get(),0);
+      require(output->getPixel(0,0)==doc::rgba(0,0,255,255),"default grouped rendering must remain unchanged");
+      cel->setZIndex(-3);groupRenderer.renderSprite(output.get(),grouped.get(),0);
+      require(output->getPixel(0,0)==doc::rgba(255,0,0,255),"grouped image cel must be able to move behind another layer");
+      cel->setZIndex(30);folder->setVisible(false);groupRenderer.renderSprite(output.get(),grouped.get(),0);
+      require(output->getPixel(0,0)==doc::rgba(255,0,0,255),"high order must never reveal a hidden group");
+    }
     {
       doc::TestContextT<app::Context> context;
       auto document = static_cast<app::Document*>(context.documents().add(2,2));

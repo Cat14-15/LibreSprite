@@ -13,6 +13,7 @@
 
 #include "app/app.h"
 #include "app/animation_workflow.h"
+#include "app/cmd/set_cel_z_index.h"
 #include "app/cmd/remove_frame_tag.h"
 #include "app/app_menus.h"
 #include "app/color_utils.h"
@@ -151,6 +152,7 @@ Timeline::Timeline()
   , m_keyButton(workflowText("Drawing Key", "그림 키 추가"))
   , m_holdButton(workflowText("Hold", "그림 유지"))
   , m_layerKeyButton(workflowText("Layer Keys...", "레이어 키..."))
+  , m_orderButton(workflowText("Order...", "앞뒤..."))
   , m_zoomOutButton("-")
   , m_zoomResetButton("")
   , m_zoomInButton("+")
@@ -171,21 +173,24 @@ Timeline::Timeline()
   m_workflowControls.addChild(&m_keyButton);
   m_workflowControls.addChild(&m_holdButton);
   m_workflowControls.addChild(&m_layerKeyButton);
+  m_workflowControls.addChild(&m_orderButton);
   addChild(&m_workflowControls);
   m_animationList.setEditable(false);
   m_animationList.setClickOpen(true);
   m_animationList.setMinSize(gfx::Size(110*guiscale(),0));
-  for (Button* button : {&m_animationButton,&m_keyButton,&m_holdButton,&m_layerKeyButton}) setup_mini_look(button);
+  for (Button* button : {&m_animationButton,&m_keyButton,&m_holdButton,&m_layerKeyButton,&m_orderButton}) setup_mini_look(button);
   m_animationList.Change.connect([this]{onAnimationChange();});
   m_animationButton.Click.connect([this]{animationMenu();});
   m_keyButton.Click.connect([this]{applyLayerKey(0);});
   m_holdButton.Click.connect([this]{applyLayerKey(2);});
   m_layerKeyButton.Click.connect([this]{layerKeyMenu();});
+  m_orderButton.Click.connect([this]{celOrderMenu();});
   auto keyTips=new TooltipManager;
   m_workflowControls.addChild(keyTips);
   keyTips->addTooltipFor(&m_keyButton,workflowText("Insert a new next frame with an independent drawing on this layer", "새 다음 프레임을 만들고 현재 레이어의 그림을 독립 복사합니다"),BOTTOM);
   keyTips->addTooltipFor(&m_holdButton,workflowText("Hold this layer through the selected range, or until its next drawing key", "선택 구간 또는 다음 키 전까지 현재 레이어의 그림을 유지합니다"),BOTTOM);
   keyTips->addTooltipFor(&m_layerKeyButton,workflowText("Blank key and position tween for the current layer", "현재 레이어의 빈 키·그림 유지·두 키 사이 위치 보간"),BOTTOM);
+  keyTips->addTooltipFor(&m_orderButton,workflowText("Change drawing order only on selected frames", "현재 레이어의 선택 프레임만 앞뒤 순서를 변경합니다"),BOTTOM);
   m_workflowControls.setVisible(false);
   m_zoomControls.addChild(&m_zoomOutButton);
   m_zoomControls.addChild(&m_zoomResetButton);
@@ -2909,7 +2914,7 @@ void Timeline::refreshWorkflow() {
   if (changed) {m_animationList.closeListBox();m_animationList.removeAllItems();for (const auto& n:names) m_animationList.addItem(n);m_animationIds=ids;}
   m_animationList.setSelectedItemIndex(selected);
   bool edit=m_layer && m_layer->isImage() && m_layer->isEditable() && !m_layer->isBackground();
-  m_keyButton.setEnabled(edit);m_holdButton.setEnabled(edit);m_layerKeyButton.setEnabled(edit);
+  m_keyButton.setEnabled(edit);m_holdButton.setEnabled(edit);m_layerKeyButton.setEnabled(edit);m_orderButton.setEnabled(edit);
 }
 void Timeline::selectAnimation(ObjectId id) {
   if (!m_document) return;
@@ -2964,9 +2969,65 @@ void Timeline::createAnimation(bool duplicate) {
 void Timeline::layerKeyMenu() {
   if (!m_document) return;
   Menu menu;
-  std::string names[]={workflowText("Insert next drawing key","다음 프레임에 그림 키 추가"),workflowText("Insert next blank key","다음 프레임에 빈 그림 키 추가"),workflowText("Hold drawing through selected frames","선택 프레임 동안 그림 유지"),workflowText("Tween position between selected keys","선택한 두 키 사이 위치 보간"),workflowText("Make current drawing independent","현재 프레임 그림만 분리")};
+  std::string names[]={workflowText("Insert drawing key on this layer","선택 레이어에 그림 키 삽입"),workflowText("Insert blank key on this layer","선택 레이어에 빈 그림 키 삽입"),workflowText("Hold drawing through selected frames","선택 프레임 동안 그림 유지"),workflowText("Tween position between selected keys","선택한 두 키 사이 위치 보간"),workflowText("Make current drawing independent","현재 프레임 그림만 분리")};
   for (int i=0;i<5;++i) {auto item=new MenuItem(names[i]);item->Click.connect([this,i]{applyLayerKey(i);});menu.addChild(item);}
   menu.showPopup(gfx::Point(m_layerKeyButton.bounds().x,m_layerKeyButton.bounds().y2()));
+}
+void Timeline::celOrderMenu() {
+  if (!m_document) return;
+  Menu menu;
+  std::string names[]={workflowText("Selected frames: bring forward", "선택 프레임: 한 단계 앞으로"),
+    workflowText("Selected frames: send backward", "선택 프레임: 한 단계 뒤로"),
+    workflowText("Selected frames: bring to front", "선택 프레임: 맨 앞으로"),
+    workflowText("Selected frames: send to back", "선택 프레임: 맨 뒤로"),
+    workflowText("Selected frames: reset layer order", "선택 프레임: 기본 레이어 순서")};
+  for (int i=0;i<5;++i) {auto item=new MenuItem(names[i]);item->setId(("celOrder"+std::to_string(i)).c_str());item->Click.connect([this,i]{applyCelOrder(i);});menu.addChild(item);}
+  menu.showPopup(gfx::Point(m_orderButton.bounds().x,m_orderButton.bounds().y2()));
+}
+void Timeline::applyCelOrder(int action) {
+  if (!m_document || !m_layer || !m_layer->isImage()) return;
+  try {
+    prepareWorkflowEdit();
+    auto layer=static_cast<LayerImage*>(m_layer);
+    if (!layer->isEditable() || layer->isBackground()) throw std::invalid_argument("Select an unlocked image layer (not Background).");
+    frame_t from=m_frame,to=m_frame;
+    if (m_range.enabled() && (m_range.type()==Range::kCels || m_range.type()==Range::kFrames)) {
+      from=MAX(firstFrame(),m_range.frameBegin());to=MIN(lastFrame(),m_range.frameEnd());
+    }
+    std::vector<Layer*> layers;m_sprite->getLayersList(layers);
+    const int base=m_sprite->layerToIndex(layer);
+    {ContextWriter writer(m_context);Transaction tx(m_context,"Change frame drawing order");
+      for (frame_t f=from;f<=to;++f) {
+        auto cel=layer->cel(f);if (!cel) continue;
+        int z=cel->zIndex();
+        int low=base+z,high=low;
+        bool hasAhead=false,hasBehind=false;
+        int aheadOrder=0,aheadZ=0,behindOrder=0,behindZ=0;
+        for (Layer* other:layers) {
+          if (!other->isImage() || other==layer || other->isBackground()) continue;
+          auto c=other->cel(f);if (!c) continue;
+          const int order=int(m_sprite->layerToIndex(other))+c->zIndex();
+          low=MIN(low,order);high=MAX(high,order);
+          const int oz=c->zIndex();
+          const bool ahead=order>base+z || (order==base+z && oz>z);
+          if (ahead && (!hasAhead || order<aheadOrder || (order==aheadOrder && oz<aheadZ))) {
+            hasAhead=true;aheadOrder=order;aheadZ=oz;
+          }
+          if (!ahead && (!hasBehind || order>behindOrder || (order==behindOrder && oz>behindZ))) {
+            hasBehind=true;behindOrder=order;behindZ=oz;
+          }
+        }
+        if (action==0 && hasAhead) {z=aheadOrder-base;if (z<=aheadZ) ++z;}
+        else if (action==1 && hasBehind) {z=behindOrder-base;if (z>=behindZ) --z;}
+        else if (action==2) z=high-base+1;
+        else if (action==3) z=low-base-1;
+        else if (action==4) z=0;
+        z=MAX(-32768,MIN(32767,z));
+        if (z!=cel->zIndex()) tx.execute(new cmd::SetCelZIndex(cel,z));
+      }
+      tx.commit();}
+    m_document->notifyGeneralUpdate();invalidate();
+  } catch (const std::exception& e) {Alert::show("Drawing order<<%s||OK",e.what());}
 }
 void Timeline::prepareWorkflowEdit() {
   if (!m_editor) return;
