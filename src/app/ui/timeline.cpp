@@ -1916,6 +1916,17 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
       return gfx::Rect(bounds.x + m_separator_x, bounds.y + y,
         m_separator_w, bounds.h - y);
 
+    case PART_COLUMN_RESIZE:
+      if (int(hit.frame) >= 0 && int(hit.frame) < 5)
+        return gfx::Rect(bounds.x+columnX(int(hit.frame)+1)-guiscale(),
+                         bounds.y+y, 2*guiscale(), HDRSIZE);
+      break;
+
+    case PART_FRAME_RESIZE:
+      return gfx::Rect(bounds.x+m_separator_x+m_separator_w-1+
+                       FRMSIZE*(int(hit.frame)+1)-viewScroll().x-guiscale(),
+                       bounds.y+y, 2*guiscale(), HDRSIZE);
+
     case PART_HEADER_EYE:
       return gfx::Rect(bounds.x, bounds.y + y, m_columnWidths[0], HDRSIZE);
 
@@ -2106,7 +2117,7 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
     hit.part = PART_SEPARATOR;
   }
   else if (m_clk.part == PART_FRAME_RESIZE) {
-    hit.part = PART_FRAME_RESIZE;
+    hit = m_clk;
   }
   else if (m_clk.part == PART_COLUMN_RESIZE) {
     hit = m_clk;
@@ -2169,8 +2180,10 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
              mousePos.x > m_separator_x + m_separator_w + 4*guiscale()) {
       const int x = mousePos.x - m_separator_x - m_separator_w + scroll.x;
       if (x % FRMSIZE <= 2*guiscale() ||
-          x % FRMSIZE >= FRMSIZE - 2*guiscale())
+          x % FRMSIZE >= FRMSIZE - 2*guiscale()) {
         hit.part = PART_FRAME_RESIZE;
+        hit.frame = frame_t(MAX(1,(x+FRMSIZE/2)/FRMSIZE)-1);
+      }
       else
         hit.part = PART_HEADER_FRAME;
     }

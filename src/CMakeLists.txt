@@ -153,6 +153,7 @@ install(TARGETS libresprite
 
 # Manual input regression checks; no display or external test package needed.
 add_executable(interaction-regression EXCLUDE_FROM_ALL tests/interaction_regression.cpp)
+target_include_directories(interaction-regression PRIVATE ${CMAKE_BINARY_DIR}/src/app)
 get_target_property(interaction_test_libraries libresprite LINK_LIBRARIES)
 target_link_libraries(interaction-regression ${interaction_test_libraries})
 

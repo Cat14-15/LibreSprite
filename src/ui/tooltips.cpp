@@ -218,6 +218,12 @@ bool TipWindow::onProcessMessage(Message* msg)
 {
   switch (msg->type()) {
 
+    case kMouseDownMessage:
+      // A tooltip is passive: dismiss it without consuming the action
+      // intended for the button or divider underneath it.
+      closeWindow(nullptr);
+      return false;
+
     case kKeyDownMessage:
       if (m_closeOnKeyDown &&
           static_cast<KeyMessage*>(msg)->scancode() < kKeyFirstModifierScancode)
@@ -227,6 +233,12 @@ bool TipWindow::onProcessMessage(Message* msg)
   }
 
   return PopupWindow::onProcessMessage(msg);
+}
+
+void TipWindow::onBroadcastMouseMessage(WidgetsList& targets)
+{
+  if (Widget* sibling = nextSibling())
+    sibling->broadcastMouseMessage(targets);
 }
 
 void TipWindow::onSizeHint(SizeHintEvent& ev)

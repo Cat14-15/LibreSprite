@@ -67,6 +67,7 @@ namespace ui {
   protected:
     bool onProcessMessage(Message* msg) override;
     void onSizeHint(SizeHintEvent& ev) override;
+    void onBroadcastMouseMessage(WidgetsList& targets) override;
     void onInitTheme(InitThemeEvent& ev) override;
     void onPaint(PaintEvent& ev) override;
 
