@@ -151,6 +151,9 @@ namespace app {
     bool m_isUpdatingColumns;
     base::ScopedConnection m_conn;
     Hit m_hot;
+    gfx::Point m_dragStartPos;
+    ui::MouseButtons m_dragStartButtons;
+    bool m_dragMoved;
     bool m_copy;
   };
 

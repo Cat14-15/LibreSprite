@@ -65,7 +65,7 @@
 
 // Width of the frames.
 #define FRMSIZE         (frameSize())
-#define ICONSIZE        (12*guiscale())
+#define ICONSIZE        (MAX(10*guiscale(), 12*guiscale()*m_iconScale/100))
 
 // Height of the layers.
 #define LAYSIZE         (layerSize())
@@ -89,6 +89,7 @@ enum {
   PART_NOTHING = 0,
   PART_TOP,
   PART_SEPARATOR,
+  PART_FRAME_RESIZE,
   PART_HEADER_EYE,
   PART_HEADER_PADLOCK,
   PART_HEADER_CONTINUOUS,
@@ -141,6 +142,7 @@ Timeline::Timeline()
   , m_zoomResetButton("")
   , m_zoomInButton("+")
   , m_timelineScale(100)
+  , m_iconScale(100)
 {
   enableFlags(CTRL_RIGHT_CLICK);
 
@@ -392,6 +394,14 @@ bool Timeline::onProcessMessage(Message* msg)
         case PART_SEPARATOR:
           m_state = STATE_MOVING_SEPARATOR;
           break;
+        case PART_FRAME_RESIZE:
+          m_state = STATE_RESIZING_FRAMES;
+          m_resizeStartX = mouseMsg->position().x;
+          m_resizeStartScale = m_timelineScale;
+          m_resizeFrameIndex = MAX(1,
+            (mouseMsg->position().x-bounds().x-m_separator_x-m_separator_w+
+             viewScroll().x+FRMSIZE/2)/FRMSIZE);
+          break;
         case PART_HEADER_ONIONSKIN_RANGE_LEFT: {
           m_state = STATE_MOVING_ONIONSKIN_RANGE_LEFT;
           m_origFrames = docPref().onionskin.prevFrames();
@@ -544,8 +554,22 @@ bool Timeline::onProcessMessage(Message* msg)
         // we shouldn't change the hot (so the separator can be
         // tracked to the mouse's released).
         if (m_clk.part == PART_SEPARATOR) {
-          m_separator_x = MAX(100*guiscale(), mousePos.x);
+          m_separator_x = MID(ICONSIZE*5 + 12*guiscale(),
+                              mousePos.x,
+                              MAX(ICONSIZE*5 + 12*guiscale(),
+                                  bounds().w - 2*FRMSIZE));
           layout();
+          updateScrollBars();
+          setViewScroll(viewScroll());
+          invalidate();
+          return true;
+        }
+
+        if (m_state == STATE_RESIZING_FRAMES) {
+          const int delta = static_cast<MouseMessage*>(msg)->position().x - m_resizeStartX;
+          setTimelineScale(m_resizeStartScale +
+                           delta*100/(12*guiscale()*m_resizeFrameIndex),
+                           gfx::Point(0, 0), false);
           return true;
         }
       }
@@ -596,12 +620,29 @@ bool Timeline::onProcessMessage(Message* msg)
           return true;
         }
 
-        setHot(hitTest(msg, mouseMsg->position() - bounds().origin()));
+        const gfx::Point releasePos = mouseMsg->position() - bounds().origin();
+        Hit released = hitTest(msg, releasePos);
+        if (mouseMsg->left() &&
+            (m_clk.part == PART_HEADER_EYE ||
+             m_clk.part == PART_HEADER_PADLOCK ||
+             m_clk.part == PART_HEADER_CONTINUOUS ||
+             m_clk.part == PART_HEADER_GEAR ||
+             m_clk.part == PART_HEADER_ONIONSKIN ||
+             m_clk.part == PART_LAYER_EYE_ICON ||
+             m_clk.part == PART_LAYER_PADLOCK_ICON ||
+             m_clk.part == PART_LAYER_CONTINUOUS_ICON)) {
+          gfx::Rect clickBounds = getPartBounds(m_clk);
+          clickBounds.enlarge(2*guiscale());
+          if (clickBounds.contains(releasePos))
+            released = m_clk;
+        }
+        setHot(released);
 
         switch (m_hot.part) {
 
           case PART_NOTHING:
           case PART_SEPARATOR:
+          case PART_FRAME_RESIZE:
           case PART_HEADER_LAYER:
             // Do nothing.
             break;
@@ -1277,6 +1318,9 @@ void Timeline::setCursor(ui::Message* msg, const Hit& hit)
   else if (hit.part == PART_SEPARATOR) {
     ui::set_mouse_cursor(kSizeWECursor);
   }
+  else if (hit.part == PART_FRAME_RESIZE) {
+    ui::set_mouse_cursor(kSizeWECursor);
+  }
   else if (hit.part == PART_FRAME_TAG) {
     ui::set_mouse_cursor(kHandCursor);
   }
@@ -1826,7 +1870,7 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
 
     case PART_SEPARATOR:
       return gfx::Rect(bounds.x + m_separator_x, bounds.y + y,
-        m_separator_x + m_separator_w, bounds.h - y);
+        m_separator_w, bounds.h - y);
 
     case PART_HEADER_EYE:
       return gfx::Rect(bounds.x, bounds.y + y, ICONSIZE, HDRSIZE);
@@ -2017,6 +2061,9 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
   if (m_clk.part == PART_SEPARATOR) {
     hit.part = PART_SEPARATOR;
   }
+  else if (m_clk.part == PART_FRAME_RESIZE) {
+    hit.part = PART_FRAME_RESIZE;
+  }
   else {
     gfx::Point scroll = viewScroll();
     int top = topHeight();
@@ -2053,9 +2100,18 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
       hit.part = PART_HEADER_ONIONSKIN_RANGE_RIGHT;
     }
     // Is the mouse on the separator.
-    else if (mousePos.x > m_separator_x-4
-          && mousePos.x <= m_separator_x)  {
+    else if (mousePos.x > m_separator_x-4*guiscale()
+          && mousePos.x <= m_separator_x+2*guiscale())  {
       hit.part = PART_SEPARATOR;
+    }
+    else if (mousePos.y >= top && mousePos.y < top+HDRSIZE &&
+             mousePos.x > m_separator_x + m_separator_w + 4*guiscale()) {
+      const int x = mousePos.x - m_separator_x - m_separator_w + scroll.x;
+      if (x % FRMSIZE <= 2*guiscale() ||
+          x % FRMSIZE >= FRMSIZE - 2*guiscale())
+        hit.part = PART_FRAME_RESIZE;
+      else
+        hit.part = PART_HEADER_FRAME;
     }
     // Is the mouse on the frame tags area?
     else if (getPartBounds(Hit(PART_HEADER_FRAME_TAGS)).contains(mousePos)) {
@@ -2109,7 +2165,9 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
         hit.part = PART_NOTHING;
     }
 
-    if (!hasCapture()) {
+    if (!hasCapture() &&
+        (hit.part == PART_CEL || hit.part == PART_LAYER_TEXT ||
+         hit.part == PART_HEADER_FRAME)) {
       gfx::Rect outline = getPartBounds(Hit(PART_RANGE_OUTLINE));
       if (outline.contains(mousePos)) {
         auto mouseMsg = dynamic_cast<MouseMessage*>(msg);
@@ -2194,6 +2252,9 @@ void Timeline::updateTooltip(const Hit& hit)
   switch (hit.part) {
     case PART_SEPARATOR:
       text = "Drag to resize the layer area";
+      break;
+    case PART_FRAME_RESIZE:
+      text = "Drag to resize frame cells";
       break;
     case PART_HEADER_EYE:
       text = "Show or hide all layers";
@@ -2430,7 +2491,7 @@ gfx::Size Timeline::getScrollableSize() const
 {
   if (m_sprite) {
     return gfx::Size(
-      m_sprite->totalFrames() * FRMSIZE + bounds().w/2,
+      MAX(visibleSize().w, m_sprite->totalFrames() * FRMSIZE),
       m_layers.size() * LAYSIZE + bounds().h/2);
   }
   else
@@ -2441,7 +2502,7 @@ gfx::Point Timeline::getMaxScrollablePos() const
 {
   if (m_sprite) {
     gfx::Size size = getScrollableSize();
-    int max_scroll_x = size.w - bounds().w/2;
+    int max_scroll_x = size.w - visibleSize().w;
     int max_scroll_y = size.h - bounds().h/2;
     max_scroll_x = MAX(0, max_scroll_x);
     max_scroll_y = MAX(0, max_scroll_y);
@@ -2723,7 +2784,7 @@ int Timeline::frameSize() const
 
 int Timeline::layerSize() const
 {
-  return ICONSIZE;
+  return 12*guiscale();
 }
 
 int Timeline::headerSize() const
@@ -2731,21 +2792,31 @@ int Timeline::headerSize() const
   return layerSize();
 }
 
-void Timeline::setTimelineScale(int scale, const gfx::Point& anchor)
+void Timeline::setTimelineScale(int scale, const gfx::Point& anchor,
+                                bool resizeLayerArea)
 {
   scale = MID(50, scale, 200);
   if (scale == m_timelineScale)
     return;
 
   const int oldFrameSize = frameSize();
+  const int oldSeparatorX = m_separator_x;
   gfx::Point scroll = viewScroll();
 
   m_timelineScale = scale;
 
   const int newFrameSize = frameSize();
-  if (anchor.x >= m_separator_x) {
-    const int relativeX = anchor.x-m_separator_x;
-    scroll.x = (scroll.x+relativeX)*newFrameSize/oldFrameSize-relativeX;
+  if (resizeLayerArea) {
+    m_iconScale = scale;
+    const int minSeparator = ICONSIZE*5 + 12*guiscale();
+    m_separator_x = MID(minSeparator,
+                        oldSeparatorX*newFrameSize/oldFrameSize,
+                        MAX(minSeparator, bounds().w-2*newFrameSize));
+  }
+  if (anchor.x >= oldSeparatorX) {
+    const int oldRelativeX = anchor.x-oldSeparatorX;
+    const int newRelativeX = anchor.x-m_separator_x;
+    scroll.x = (scroll.x+oldRelativeX)*newFrameSize/oldFrameSize-newRelativeX;
   }
   else {
     scroll.x = scroll.x*newFrameSize/oldFrameSize;

@@ -69,6 +69,7 @@ namespace app {
       STATE_SELECTING_FRAMES,
       STATE_SELECTING_CELS,
       STATE_MOVING_SEPARATOR,
+      STATE_RESIZING_FRAMES,
       STATE_MOVING_RANGE,
       STATE_MOVING_ONIONSKIN_RANGE_LEFT,
       STATE_MOVING_ONIONSKIN_RANGE_RIGHT
@@ -257,7 +258,8 @@ namespace app {
     int frameSize() const;
     int layerSize() const;
     int headerSize() const;
-    void setTimelineScale(int scale, const gfx::Point& anchor = gfx::Point(-1, -1));
+    void setTimelineScale(int scale, const gfx::Point& anchor = gfx::Point(-1, -1),
+                          bool resizeLayerArea = true);
     void zoomTimelineOut();
     void resetTimelineZoom();
     void zoomTimelineIn();
@@ -280,6 +282,9 @@ namespace app {
     std::vector<Layer*> m_layers;
     int m_separator_x;
     int m_separator_w;
+    int m_resizeStartX;
+    int m_resizeStartScale;
+    int m_resizeFrameIndex;
     int m_origFrames;
     Hit m_hot;       // The 'hot' part is where the mouse is on top of
     DropTarget m_dropTarget;
@@ -306,6 +311,7 @@ namespace app {
     ui::Button m_zoomResetButton;
     ui::Button m_zoomInButton;
     int m_timelineScale;
+    int m_iconScale;
 
     // Temporal data used to move the range.
     struct MoveRange {

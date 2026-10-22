@@ -60,6 +60,7 @@ PaletteView::PaletteView(bool editable, PaletteViewStyle style, PaletteViewDeleg
   , m_rangeAnchor(-1)
   , m_isUpdatingColumns(false)
   , m_hot(Hit::NONE)
+  , m_dragMoved(false)
   , m_copy(false)
 {
   setFocusStop(true);
@@ -283,6 +284,10 @@ bool PaletteView::onProcessMessage(Message* msg)
       break;
 
     case kMouseDownMessage:
+      m_dragStartPos = static_cast<MouseMessage*>(msg)->position();
+      m_dragStartButtons = static_cast<MouseMessage*>(msg)->buttons();
+      m_dragMoved = false;
+      m_hot = hitTest(m_dragStartPos - bounds().origin());
       switch (m_hot.part) {
 
         case Hit::COLOR:
@@ -304,6 +309,20 @@ bool PaletteView::onProcessMessage(Message* msg)
 
     case kMouseMoveMessage: {
       MouseMessage* mouseMsg = static_cast<MouseMessage*>(msg);
+
+      if (hasCapture() && msg->type() == kMouseMoveMessage)
+        m_hot = hitTest(mouseMsg->position() - bounds().origin());
+
+      if (hasCapture() && msg->type() == kMouseMoveMessage &&
+          (m_state == State::SELECTING_COLOR ||
+           m_state == State::DRAGGING_OUTLINE) &&
+          (std::abs(mouseMsg->position().x-m_dragStartPos.x) >= 4*guiscale() ||
+           std::abs(mouseMsg->position().y-m_dragStartPos.y) >= 4*guiscale())) {
+        m_dragMoved = true;
+        if (m_state == State::SELECTING_COLOR && m_editable &&
+            (m_dragStartButtons & kButtonLeft) == kButtonLeft)
+          m_state = State::DRAGGING_OUTLINE;
+      }
 
       setStatusBar();
 
@@ -343,13 +362,23 @@ bool PaletteView::onProcessMessage(Message* msg)
 
     case kMouseUpMessage:
       if (hasCapture()) {
+        m_hot = hitTest(static_cast<MouseMessage*>(msg)->position() - bounds().origin());
         releaseMouse();
 
         switch (m_state) {
 
           case State::DRAGGING_OUTLINE:
-            if (m_hot.part == Hit::COLOR ||
-                m_hot.part == Hit::POSSIBLE_COLOR) {
+            if (!m_dragMoved && m_hot.color >= 0 &&
+                m_hot.color < currentPalette()->size()) {
+              deselect();
+              selectColor(m_hot.color);
+              m_selectedEntries[m_hot.color] = true;
+              if (m_delegate)
+                m_delegate->onPaletteViewIndexChange(m_hot.color, m_dragStartButtons);
+            }
+            else if (m_dragMoved &&
+                     (m_hot.part == Hit::COLOR ||
+                      m_hot.part == Hit::POSSIBLE_COLOR)) {
               int i = m_hot.color;
               if (!m_copy && i > m_selectedEntries.firstPick())
                 i += m_selectedEntries.picks();
