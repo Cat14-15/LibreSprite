@@ -21,6 +21,7 @@
 #include "ui/scroll_bar.h"
 #include "ui/box.h"
 #include "ui/button.h"
+#include "ui/combobox.h"
 #include "ui/timer.h"
 #include "ui/widget.h"
 
@@ -249,12 +250,21 @@ namespace app {
     // The layer of the top.
     LayerIndex lastLayer() const { return LayerIndex(m_layers.size()-1); }
 
-    frame_t firstFrame() const { return frame_t(0); }
-    frame_t lastFrame() const { return m_sprite->lastFrame(); }
+    frame_t firstFrame() const;
+    frame_t lastFrame() const;
 
     bool validLayer(LayerIndex layer) const { return layer >= firstLayer() && layer <= lastLayer(); }
     bool validFrame(frame_t frame) const { return frame >= firstFrame() && frame <= lastFrame(); }
 
+    FrameTag* selectedAnimation() const;
+    void refreshWorkflow();
+    void selectAnimation(ObjectId id);
+    void onAnimationChange();
+    void animationMenu();
+    void createAnimation(bool duplicate);
+    void layerKeyMenu();
+    void applyLayerKey(int action);
+    int workflowHeight() const;
     int topHeight() const;
     int frameSize() const;
     int layerSize() const;
@@ -312,6 +322,15 @@ namespace app {
     bool m_copy;     // True if the drag-and-drop operation is a copy.
     bool m_fromTimeline;
 
+    ui::HBox m_workflowControls;
+    ui::ComboBox m_animationList;
+    ui::Button m_animationButton;
+    ui::Button m_keyButton;
+    ui::Button m_holdButton;
+    ui::Button m_layerKeyButton;
+    ObjectId m_animationId = NullId;
+    bool m_updatingWorkflow = false;
+    std::vector<ObjectId> m_animationIds;
     AniControls m_aniControls;
     ui::HBox m_zoomControls;
     ui::Button m_zoomOutButton;

@@ -12,6 +12,8 @@
 #include "app/ui/timeline.h"
 
 #include "app/app.h"
+#include "app/animation_workflow.h"
+#include "app/cmd/remove_frame_tag.h"
 #include "app/app_menus.h"
 #include "app/color_utils.h"
 #include "app/commands/command.h"
@@ -54,6 +56,9 @@
 #include "ui/ui.h"
 
 #include <cstdio>
+#include <exception>
+#include <functional>
+#include <stdexcept>
 
 // Size of the thumbnail in the screen (width x height), the really
 // size of the thumbnail bitmap is specified in the
@@ -83,6 +88,10 @@ using namespace app::skin;
 using namespace gfx;
 using namespace doc;
 using namespace ui;
+
+static std::string workflowText(const char* english, const char* korean) {
+  return getLanguage()=="kr" ? korean : i18n(english);
+}
 
 enum {
   PART_NOTHING = 0,
@@ -138,6 +147,10 @@ Timeline::Timeline()
   , m_offset_count(0)
   , m_scroll(false)
   , m_fromTimeline(false)
+  , m_animationButton(workflowText("Animations...", "동작 관리"))
+  , m_keyButton(workflowText("Drawing Key", "그림 키 추가"))
+  , m_holdButton(workflowText("Hold", "그림 유지"))
+  , m_layerKeyButton(workflowText("Layer Keys...", "레이어 키..."))
   , m_zoomOutButton("-")
   , m_zoomResetButton("")
   , m_zoomInButton("+")
@@ -153,6 +166,27 @@ Timeline::Timeline()
 
   setDoubleBuffered(true);
   addChild(&m_aniControls);
+  m_workflowControls.addChild(&m_animationList);
+  m_workflowControls.addChild(&m_animationButton);
+  m_workflowControls.addChild(&m_keyButton);
+  m_workflowControls.addChild(&m_holdButton);
+  m_workflowControls.addChild(&m_layerKeyButton);
+  addChild(&m_workflowControls);
+  m_animationList.setEditable(false);
+  m_animationList.setClickOpen(true);
+  m_animationList.setMinSize(gfx::Size(110*guiscale(),0));
+  for (Button* button : {&m_animationButton,&m_keyButton,&m_holdButton,&m_layerKeyButton}) setup_mini_look(button);
+  m_animationList.Change.connect([this]{onAnimationChange();});
+  m_animationButton.Click.connect([this]{animationMenu();});
+  m_keyButton.Click.connect([this]{applyLayerKey(0);});
+  m_holdButton.Click.connect([this]{applyLayerKey(2);});
+  m_layerKeyButton.Click.connect([this]{layerKeyMenu();});
+  auto keyTips=new TooltipManager;
+  m_workflowControls.addChild(keyTips);
+  keyTips->addTooltipFor(&m_keyButton,workflowText("Independent drawing key on this layer; keep following held frames", "현재 레이어에 독립된 그림 키를 만들고 뒤의 유지 구간에 적용합니다"),BOTTOM);
+  keyTips->addTooltipFor(&m_holdButton,workflowText("Hold this layer through the selected range, or until its next drawing key", "선택 구간 또는 다음 키 전까지 현재 레이어의 그림을 유지합니다"),BOTTOM);
+  keyTips->addTooltipFor(&m_layerKeyButton,workflowText("Blank key and position tween for the current layer", "현재 레이어의 빈 키·그림 유지·두 키 사이 위치 보간"),BOTTOM);
+  m_workflowControls.setVisible(false);
   m_zoomControls.addChild(&m_zoomOutButton);
   m_zoomControls.addChild(&m_zoomResetButton);
   m_zoomControls.addChild(&m_zoomInButton);
@@ -202,6 +236,7 @@ Timeline::~Timeline()
 void Timeline::updateUsingEditor(Editor* editor)
 {
   m_aniControls.updateUsingEditor(editor);
+  Document* previousDocument=m_document;
 
   detachDocument();
 
@@ -233,12 +268,14 @@ void Timeline::updateUsingEditor(Editor* editor)
       m_frame == site.frame())
     return;
 
+  if (previousDocument!=site.document()) m_animationId=NullId;
   m_document = static_cast<app::Document*>(site.document());
   m_sprite = site.sprite();
   m_layer = site.layer();
   m_frame = site.frame();
   m_state = STATE_STANDBY;
   m_zoomControls.setVisible(true);
+  refreshWorkflow();
   m_hot.part = PART_NOTHING;
   m_clk.part = PART_NOTHING;
 
@@ -261,6 +298,7 @@ void Timeline::detachDocument()
   }
 
   m_zoomControls.setVisible(false);
+  m_workflowControls.setVisible(false);
 
   invalidate();
 }
@@ -276,6 +314,7 @@ void Timeline::setLayer(Layer* layer)
   ASSERT(m_editor != NULL);
 
   m_layer = layer;
+  refreshWorkflow();
   invalidate();
 
   if (m_editor->layer() != layer)
@@ -287,10 +326,7 @@ void Timeline::setFrame(frame_t frame, bool byUser)
   ASSERT(m_editor != NULL);
   // ASSERT(frame >= 0 && frame < m_sprite->totalFrames());
 
-  if (frame < 0)
-    frame = firstFrame();
-  else if (frame >= m_sprite->totalFrames())
-    frame = frame_t(m_sprite->totalFrames()-1);
+  frame = MID(firstFrame(),frame,lastFrame());
 
   m_frame = frame;
   invalidate();
@@ -1040,15 +1076,16 @@ void Timeline::onResize(ui::ResizeEvent& ev)
 
   gfx::Size sz = m_aniControls.sizeHint();
   m_aniControls.setBounds(
-    gfx::Rect(rc.x, rc.y, MIN(sz.w, m_separator_x),
+    gfx::Rect(rc.x, rc.y+workflowHeight(), MIN(sz.w, m_separator_x),
       font()->height() +
       skinTheme()->dimensions.timelineTagsAreaHeight()));
 
   gfx::Size zoomSize = m_zoomControls.sizeHint();
   m_zoomControls.setBounds(
-    gfx::Rect(rc.x2()-zoomSize.w, rc.y, zoomSize.w,
+    gfx::Rect(rc.x2()-zoomSize.w, rc.y+workflowHeight(), zoomSize.w,
       font()->height() + skinTheme()->dimensions.timelineTagsAreaHeight()));
 
+  m_workflowControls.setBounds(gfx::Rect(rc.x,rc.y,rc.w,workflowHeight()));
   updateScrollBars();
 }
 
@@ -1196,6 +1233,8 @@ void Timeline::onAfterCommandExecution(CommandExecutionEvent& ev)
     return;
 
   regenerateLayers();
+  refreshWorkflow();
+  updateScrollBars();
   showCurrentCel();
   invalidate();
 }
@@ -1208,6 +1247,8 @@ void Timeline::onRemoveDocument(doc::Document* document)
 
 void Timeline::onGeneralUpdate(DocumentEvent& ev)
 {
+  refreshWorkflow();
+  updateScrollBars();
   invalidate();
 }
 
@@ -1393,8 +1434,8 @@ void Timeline::getDrawableFrames(ui::Graphics* g, frame_t* first_frame, frame_t*
 {
   int availW = (clientBounds().w - m_separator_x);
 
-  *first_frame = frame_t(viewScroll().x / FRMSIZE);
-  *last_frame = *first_frame + frame_t(availW / FRMSIZE) + ((availW % FRMSIZE) > 0 ? 1: 0);
+  *first_frame = firstFrame()+frame_t(viewScroll().x / FRMSIZE);
+  *last_frame = MIN(lastFrame(),*first_frame + frame_t(availW / FRMSIZE) + ((availW % FRMSIZE) > 0 ? 1: 0));
 }
 
 void Timeline::drawPart(ui::Graphics* g, const gfx::Rect& bounds,
@@ -1702,11 +1743,12 @@ void Timeline::drawFrameTags(ui::Graphics* g)
 
   g->fillRect(theme->colors.workspace(),
     gfx::Rect(
-      0, font()->height(),
+      0, workflowHeight()+font()->height(),
       clientBounds().w,
       theme->dimensions.timelineTagsAreaHeight()));
 
   for (FrameTag* frameTag : m_sprite->frameTags()) {
+    if (selectedAnimation() && frameTag->id()!=m_animationId) continue;
     gfx::Rect bounds1 = getPartBounds(Hit(PART_HEADER_FRAME, firstLayer(), frameTag->fromFrame()));
     gfx::Rect bounds2 = getPartBounds(Hit(PART_HEADER_FRAME, firstLayer(), frameTag->toFrame()));
     gfx::Rect bounds = bounds1.createUnion(bounds2);
@@ -1924,7 +1966,7 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
 
     case PART_FRAME_RESIZE:
       return gfx::Rect(bounds.x+m_separator_x+m_separator_w-1+
-                       FRMSIZE*(int(hit.frame)+1)-viewScroll().x-guiscale(),
+                       FRMSIZE*(int(hit.frame-firstFrame())+1)-viewScroll().x-guiscale(),
                        bounds.y+y, 2*guiscale(), HDRSIZE);
 
     case PART_HEADER_EYE:
@@ -1949,14 +1991,14 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
     case PART_HEADER_FRAME:
       return gfx::Rect(
         bounds.x + m_separator_x + m_separator_w - 1
-        + FRMSIZE*MAX(firstFrame(), hit.frame) - viewScroll().x,
+        + FRMSIZE*(MAX(firstFrame(), hit.frame)-firstFrame()) - viewScroll().x,
         bounds.y + y, FRMSIZE, HDRSIZE);
 
     case PART_HEADER_FRAME_TAGS:
       return gfx::Rect(
           bounds.x + m_separator_x + m_separator_w - 1,
-          bounds.y,
-          bounds.w - m_separator_x - m_separator_w + 1, y);
+          bounds.y+workflowHeight(),
+          bounds.w - m_separator_x - m_separator_w + 1, y-workflowHeight());
 
     case PART_LAYER:
       if (validLayer(hit.layer)) {
@@ -2002,7 +2044,7 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
     case PART_CEL:
       if (validLayer(hit.layer) && hit.frame >= frame_t(0)) {
         return gfx::Rect(
-          bounds.x + m_separator_x + m_separator_w - 1 + FRMSIZE*hit.frame - viewScroll().x,
+          bounds.x + m_separator_x + m_separator_w - 1 + FRMSIZE*(hit.frame-firstFrame()) - viewScroll().x,
           bounds.y + y + HDRSIZE + LAYSIZE*(lastLayer()-hit.layer) - viewScroll().y,
           FRMSIZE, LAYSIZE);
       }
@@ -2132,7 +2174,7 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
         - HDRSIZE
         + scroll.y) / LAYSIZE);
 
-    hit.frame = frame_t((mousePos.x
+    hit.frame = firstFrame()+frame_t((mousePos.x
         - m_separator_x
         - m_separator_w
         + scroll.x) / FRMSIZE);
@@ -2140,7 +2182,7 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
     if (hasCapture()) {
       hit.layer = MID(firstLayer(), hit.layer, lastLayer());
       if (isMovingCel())
-        hit.frame = MAX(firstFrame(), hit.frame);
+        hit.frame = selectedAnimation()?MID(firstFrame(),hit.frame,lastFrame()):MAX(firstFrame(), hit.frame);
       else
         hit.frame = MID(firstFrame(), hit.frame, lastFrame());
     }
@@ -2182,7 +2224,7 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
       if (x % FRMSIZE <= 2*guiscale() ||
           x % FRMSIZE >= FRMSIZE - 2*guiscale()) {
         hit.part = PART_FRAME_RESIZE;
-        hit.frame = frame_t(MAX(1,(x+FRMSIZE/2)/FRMSIZE)-1);
+        hit.frame = firstFrame()+frame_t(MAX(1,(x+FRMSIZE/2)/FRMSIZE)-1);
       }
       else
         hit.part = PART_HEADER_FRAME;
@@ -2281,7 +2323,7 @@ Timeline::Hit Timeline::hitTestCel(const gfx::Point& mousePos)
      - HDRSIZE
      + scroll.y) / LAYSIZE);
 
-  hit.frame = frame_t((mousePos.x
+  hit.frame = firstFrame()+frame_t((mousePos.x
                        - m_separator_x
                        - m_separator_w
                        + scroll.x) / FRMSIZE);
@@ -2526,7 +2568,7 @@ void Timeline::showCel(LayerIndex layer, frame_t frame)
     viewport.h += m_vbar.getBarWidth();
 
   gfx::Rect celBounds(
-    viewport.x + FRMSIZE*frame - scroll.x,
+    viewport.x + FRMSIZE*(frame-firstFrame()) - scroll.x,
     viewport.y + LAYSIZE*(lastLayer() - layer) - scroll.y,
     FRMSIZE, LAYSIZE);
 
@@ -2567,7 +2609,7 @@ gfx::Size Timeline::getScrollableSize() const
 {
   if (m_sprite) {
     return gfx::Size(
-      MAX(visibleSize().w, m_sprite->totalFrames() * FRMSIZE),
+      MAX(visibleSize().w, (lastFrame()-firstFrame()+1) * FRMSIZE),
       m_layers.size() * LAYSIZE + bounds().h/2);
   }
   else
@@ -2754,7 +2796,7 @@ void Timeline::updateDropRange(const gfx::Point& pt)
       layerIdx = MID(firstLayer(), layerIdx, LayerIndex(m_layers.size() - m_range.layers()));
 
       frame_t frame = dx+m_range.frameBegin();
-      frame = MAX(firstFrame(), frame);
+      frame = selectedAnimation()?MID(firstFrame(),frame,lastFrame()-m_range.frames()+1):MAX(firstFrame(), frame);
 
       m_dropRange.startRange(layerIdx, frame, m_range.type());
       m_dropRange.endRange(
@@ -2842,10 +2884,112 @@ skin::SkinTheme* Timeline::skinTheme() const
   return static_cast<SkinTheme*>(theme());
 }
 
+
+FrameTag* Timeline::selectedAnimation() const {
+  return m_sprite && m_animationId!=NullId ? m_sprite->frameTags().getById(m_animationId) : nullptr;
+}
+frame_t Timeline::firstFrame() const {auto t=selectedAnimation();return t?t->fromFrame():frame_t(0);}
+frame_t Timeline::lastFrame() const {auto t=selectedAnimation();return t?t->toFrame():(m_sprite?m_sprite->lastFrame():frame_t(0));}
+int Timeline::workflowHeight() const {return m_document?font()->height()+12*guiscale():0;}
+void Timeline::refreshWorkflow() {
+  if (m_updatingWorkflow) return;
+  base::ScopedValue<bool> updating(m_updatingWorkflow,true,false);
+  m_workflowControls.setVisible(m_document && m_sprite);
+  if (!m_sprite || !m_document) return;
+  if (!selectedAnimation()) m_animationId=NullId;
+  std::vector<ObjectId> ids{NullId};
+  std::vector<std::string> names{workflowText("All animations","전체 동작")};
+  int selected=0;
+  for (auto t:m_sprite->frameTags()) {
+    ids.push_back(t->id());names.push_back(t->name()+" ("+std::to_string(t->toFrame()-t->fromFrame()+1)+")");
+    if (t->id()==m_animationId) selected=int(ids.size())-1;
+  }
+  bool changed=ids!=m_animationIds || m_animationList.getItemCount()!=int(names.size());
+  if (!changed) for (int i=0;i<int(names.size());++i) if (m_animationList.getItemText(i)!=names[i]) {changed=true;break;}
+  if (changed) {m_animationList.closeListBox();m_animationList.removeAllItems();for (const auto& n:names) m_animationList.addItem(n);m_animationIds=ids;}
+  m_animationList.setSelectedItemIndex(selected);
+  bool edit=m_layer && m_layer->isImage() && m_layer->isEditable() && !m_layer->isBackground();
+  m_keyButton.setEnabled(edit);m_holdButton.setEnabled(edit);m_layerKeyButton.setEnabled(edit);
+}
+void Timeline::selectAnimation(ObjectId id) {
+  if (!m_document) return;
+  if (m_editor->isPlaying()) m_editor->stop();
+  m_animationId=id;m_range.disableRange();cleanClk();setFrame(selectedAnimation()?firstFrame():m_frame,true);
+  refreshWorkflow();setViewScroll(gfx::Point(0,viewScroll().y));updateScrollBars();invalidate();
+}
+void Timeline::onAnimationChange() {
+  if (m_updatingWorkflow) return;
+  int i=m_animationList.getSelectedItemIndex();if (i>=0 && i<int(m_animationIds.size())) selectAnimation(m_animationIds[i]);
+}
+void Timeline::animationMenu() {
+  if (!m_document) return;
+  Menu menu;
+  auto add=[&](const std::string& label,std::function<void()> fn,bool enabled=true){auto i=new MenuItem(label);i->setEnabled(enabled);i->Click.connect(fn);menu.addChild(i);};
+  add(workflowText("New animation...","새 동작 만들기..."),[this]{createAnimation(false);});
+  add(workflowText("Duplicate animation...","선택 동작 복제..."),[this]{createAnimation(true);},selectedAnimation()!=nullptr);
+  add(workflowText("Name, range and direction...","이름·구간·재생 방향..."),[this]{
+    auto tag=selectedAnimation();if (!tag) return;Params params;params.set("id",std::to_string(tag->id()).c_str());
+    m_context->executeCommand(CommandsModule::instance()->getCommandByName(CommandId::FrameTagProperties),params);
+    refreshWorkflow();setFrame(m_frame,false);updateScrollBars();invalidate();
+  },selectedAnimation()!=nullptr);
+  add(workflowText("Remove tag (keep drawings)","동작 태그 삭제 (그림 유지)"),[this]{
+    auto tag=selectedAnimation();if (!tag) return;
+    {ContextWriter writer(m_context);Transaction tx(m_context,"Remove animation tag");tx.execute(new cmd::RemoveFrameTag(m_sprite,tag));tx.commit();}
+    m_animationId=NullId;refreshWorkflow();updateScrollBars();invalidate();
+  },selectedAnimation()!=nullptr);
+  menu.showPopup(gfx::Point(m_animationButton.bounds().x,m_animationButton.bounds().y2()));
+}
+void Timeline::createAnimation(bool duplicate) {
+  auto source=duplicate?selectedAnimation():nullptr;if (!m_document || (duplicate && !source)) return;
+  Window window(Window::WithTitleBar,workflowText("Animation","동작 만들기"));VBox box;
+  Label label(workflowText("Name","동작 이름"));
+  Entry name(128,"%s",source?(source->name()+"-1").c_str():workflowText("New Animation","새 동작").c_str());
+  HBox fields;Label countLabel(workflowText("Frames","프레임 수"));Entry count(5,"%d",source?int(source->toFrame()-source->fromFrame()+1):8);
+  Label durationLabel(workflowText("ms/frame","프레임 시간(ms)"));Entry duration(5,"%d",m_sprite->frameDuration(m_frame));
+  HBox buttons;Button ok(workflowText("Create","만들기")),cancel(workflowText("Cancel","취소"));
+  name.setId("animationName");count.setId("animationFrames");duration.setId("animationDuration");ok.setId("animationCreate");
+  count.setReadOnly(duplicate);duration.setReadOnly(duplicate);
+  window.addChild(&box);box.addChild(&label);box.addChild(&name);box.addChild(&fields);box.addChild(&buttons);
+  fields.addChild(&countLabel);fields.addChild(&count);fields.addChild(&durationLabel);fields.addChild(&duration);buttons.addChild(&ok);buttons.addChild(&cancel);
+  ok.Click.connect([&]{window.closeWindow(&ok);});cancel.Click.connect([&]{window.closeWindow(&cancel);});
+  window.remapWindow();window.centerWindow();name.selectAllText();name.requestFocus();window.openWindowInForeground();if (window.closer()!=&ok) return;
+  try {ObjectId id;
+    {ContextWriter writer(m_context);Transaction tx(m_context,duplicate?"Duplicate animation":"Create animation");
+      auto tag=animation::appendClip(m_document,tx,name.text(),count.textInt(),duration.textInt(),m_frame,source);id=tag->id();tx.commit();}
+    selectAnimation(id);m_document->notifyGeneralUpdate();
+  } catch (const std::exception& e) {Alert::show("Animation<<%s||OK",e.what());}
+}
+void Timeline::layerKeyMenu() {
+  if (!m_document) return;
+  Menu menu;
+  std::string names[]={workflowText("Drawing key (independent)","그림 키 추가 (독립 편집)"),workflowText("Blank drawing key","빈 그림 키 추가"),workflowText("Hold drawing through selected frames","선택 프레임 동안 그림 유지"),workflowText("Tween position between selected keys","선택한 두 키 사이 위치 보간")};
+  for (int i=0;i<4;++i) {auto item=new MenuItem(names[i]);item->Click.connect([this,i]{applyLayerKey(i);});menu.addChild(item);}
+  menu.showPopup(gfx::Point(m_layerKeyButton.bounds().x,m_layerKeyButton.bounds().y2()));
+}
+void Timeline::applyLayerKey(int action) {
+  if (!m_document || !m_layer || !m_layer->isImage()) return;
+  try {
+    if (m_editor->isPlaying()) m_editor->stop();
+    auto layer=static_cast<LayerImage*>(m_layer);frame_t from=m_frame,to=m_frame;
+    bool range=m_range.enabled() && (m_range.type()==Range::kCels || m_range.type()==Range::kFrames) && m_range.frames()>1;
+    if (range) {from=MAX(firstFrame(),m_range.frameBegin());to=MIN(lastFrame(),m_range.frameEnd());}
+    if (action==2 && !range) {auto key=layer->cel(from);if (!key) throw std::invalid_argument("Select a drawing first.");
+      while (to<lastFrame()) {auto next=layer->cel(to+1);if (next && next->dataRef()!=key->dataRef()) break;++to;}}
+    if (action==3 && (!range || to-from<2)) throw std::invalid_argument("Select two keys with at least one frame between them.");
+    {ContextWriter writer(m_context);Transaction tx(m_context,action==3?"Tween layer position":"Edit layer keys");
+      if (action<=1) animation::drawingKey(m_document,tx,layer,m_frame,firstFrame(),lastFrame(),action==1);
+      else if (action==2) animation::hold(m_document,tx,layer,from,to);
+      else animation::tweenPosition(m_document,tx,layer,from,to);
+      tx.commit();}
+    m_document->notifyGeneralUpdate();invalidate();
+  } catch (const std::exception& e) {Alert::show("Layer keys<<%s||OK",e.what());}
+}
+
 int Timeline::topHeight() const
 {
   int h = 0;
   if (m_document && m_sprite) {
+    h += workflowHeight();
     h += skinTheme()->dimensions.timelineTopBorder();
     h += font()->height();
     h += skinTheme()->dimensions.timelineTagsAreaHeight();

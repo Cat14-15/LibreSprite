@@ -300,6 +300,7 @@ add_library(app-lib
   context.cpp
   context_flags.cpp
   document.cpp
+  animation_workflow.cpp
   document_api.cpp
   document_exporter.cpp
   document_range.cpp

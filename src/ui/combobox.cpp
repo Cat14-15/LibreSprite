@@ -361,6 +361,10 @@ bool ComboBox::onProcessMessage(Message* msg)
           Widget* pick = manager()->pick(mouseMsg->position());
           return (pick && pick->hasAncestor(this) ? true: false);
         }
+        // This widget is a message filter for its separate popup window.
+        // Let an inside click reach the list; bubbling it to our parent can
+        // activate the timeline behind the popup and consume the click.
+        return false;
       }
       break;
 

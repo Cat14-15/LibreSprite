@@ -17,6 +17,14 @@
 #include "app/document_api.h"
 #include "app/context.h"
 #include "app/document.h"
+#include "app/animation_workflow.h"
+#include "app/context_access.h"
+#include "app/document_api.h"
+#include "app/document_undo.h"
+#include "app/transaction.h"
+#include "app/cmd/add_frame_tag.h"
+#include "doc/frame_tag.h"
+#include "doc/frame_tags.h"
 #include "app/document_range.h"
 #include "app/document_range_ops.h"
 #include "doc/layer.h"
@@ -37,6 +45,9 @@
 #include "she/display.h"
 #include "she/surface.h"
 #include <iostream>
+#include <fstream>
+#include "ui/listitem.h"
+#include "ui/entry.h"
 #include <memory>
 #include <stdexcept>
 
@@ -130,6 +141,88 @@ static int fullUI(const char* executable) {
     down(lock); up(lock);
     require(original->isEditable() != editable, "actual row lock must toggle on the first click");
     std::cerr << "CHECK: real visibility and canvas passed\n";
+
+    // Real timeline controls must edit only one layer, preserving held drawings
+    // and every other layer's data/position. Use a disposable test document.
+    original->setEditable(true);
+    auto arm=static_cast<doc::LayerImage*>(original);
+    auto body=static_cast<doc::LayerImage*>(sprite->indexToLayer(doc::LayerIndex(0)));
+    {
+      app::ContextWriter writer(app::UIContext::instance());app::Transaction tx(app::UIContext::instance(),"Key test setup");
+      app::DocumentApi api(document,tx);
+      for (int f=1;f<5;++f) api.addEmptyFrame(sprite,f);
+      doc::ImageRef image(doc::Image::create(doc::IMAGE_RGB,8,8));doc::clear_image(image.get(),doc::rgba(0,0,255,255));api.addCel(body,0,image);
+      app::animation::hold(document,tx,body,0,4);
+      app::animation::hold(document,tx,arm,0,4);
+      tx.commit();
+    }
+    const auto bodyData=body->cel(0)->dataRef();
+    timeline->setLayer(arm);timeline->setFrame(2,true);repaint();
+    const auto keyPoint=timeline->m_keyButton.bounds().center();down(keyPoint);up(keyPoint);
+    require(arm->cel(2)->dataRef()!=arm->cel(0)->dataRef(),"actual drawing-key button must unlink the selected layer");
+    require(arm->cel(3)->dataRef()==arm->cel(2)->dataRef() && arm->cel(4)->dataRef()==arm->cel(2)->dataRef(),"new key must own the following held drawing segment");
+    require(arm->cel(1)->dataRef()==arm->cel(0)->dataRef(),"earlier held frames must remain unchanged");
+    document->undoHistory()->undo();
+    require(arm->cel(4)->dataRef()==arm->cel(0)->dataRef(),"one Undo must restore the entire old hold segment");
+    document->undoHistory()->redo();
+    require(arm->cel(4)->dataRef()==arm->cel(2)->dataRef() && arm->cel(2)->dataRef()!=arm->cel(0)->dataRef(),"Redo must restore the new key and its holds");
+    {
+      app::ContextWriter writer(app::UIContext::instance());app::Transaction tx(app::UIContext::instance(),"End key");
+      app::animation::drawingKey(document,tx,arm,4,0,4,false);
+      app::DocumentApi api(document,tx);api.setCelPosition(sprite,arm->cel(4),8,4);
+      api.setFrameDuration(sprite,0,100);api.setFrameDuration(sprite,1,300);api.setFrameDuration(sprite,2,100);api.setFrameDuration(sprite,3,100);tx.commit();
+    }
+    timeline->m_range.startRange(timeline->getLayerIndex(arm),0,app::DocumentRange::kCels);
+    timeline->m_range.endRange(timeline->getLayerIndex(arm),4);
+    timeline->applyLayerKey(3);
+    require(arm->cel(0)->x()==0 && arm->cel(4)->x()==8,"position tween must preserve both endpoint keys");
+    require(arm->cel(1)->x()==1 && arm->cel(2)->x()==5 && arm->cel(3)->x()==7,"position tween must use frame durations and independent cel data");
+    for (int f=0;f<5;++f) require(body->cel(f)->dataRef()==bodyData && body->cel(f)->x()==0,"layer-key edits must leave every other layer unchanged");
+    timeline->m_range.disableRange();timeline->setFrame(3,true);timeline->applyLayerKey(1);
+    require(arm->cel(3)->image()->getPixel(0,0)==0,"blank key must create an explicit transparent drawing");
+    document->undoHistory()->undo();
+    require(arm->cel(3)->x()==7,"blank-key Undo must restore the previous drawing and position");
+    doc::FrameTag *idle,*walk,*copy;
+    {
+      app::ContextWriter writer(app::UIContext::instance());app::Transaction tx(app::UIContext::instance(),"Animation test");
+      idle=new doc::FrameTag(0,4);idle->setName("idle");tx.execute(new app::cmd::AddFrameTag(sprite,idle));
+      walk=app::animation::appendClip(document,tx,"walk",4,90,0);
+      copy=app::animation::appendClip(document,tx,"walk",4,90,0,walk);tx.commit();
+    }
+    require(idle->toFrame()==4 && walk->fromFrame()==5 && walk->toFrame()==8 && copy->fromFrame()==9,"new animation must not extend or merge another animation tag");
+    require(copy->name()=="walk-1","animation copies must receive a unique name");
+    require(arm->cel(5)->dataRef()!=arm->cel(0)->dataRef() && arm->cel(9)->dataRef()!=arm->cel(5)->dataRef(),"animation drawings must be isolated from their source animation");
+    require(arm->cel(5)->dataRef()==arm->cel(8)->dataRef() && arm->cel(9)->dataRef()==arm->cel(12)->dataRef(),"held drawing links must survive animation duplication");
+    timeline->refreshWorkflow();repaint();
+    auto comboArrow=timeline->m_animationList.getButtonWidget()->bounds().center();
+    down(comboArrow);up(comboArrow);repaint();
+    auto animationChoice=timeline->m_animationList.getItem(2)->bounds().center();
+    down(animationChoice);up(animationChoice);repaint();
+    require(timeline->firstFrame()==5 && timeline->lastFrame()==8 && timeline->getFrame()==5,"animation selection must isolate and activate the chosen range");
+    const auto header=point(timeline->m_separator_x+timeline->frameSize()/2,timeline->topHeight()+timeline->headerSize()/2);
+    down(header);up(header);
+    require(timeline->getFrame()==5,"first visible cell must target the selected animation's first actual frame");
+    timeline->selectAnimation(doc::NullId);repaint();
+    require(timeline->firstFrame()==0 && timeline->lastFrame()==12,"All animations must restore the full timeline");
+    bool createdFromDialog=false;
+    ui::Timer author(10,manager);
+    author.Tick.connect([&]{
+      auto name=manager->findChildT<ui::Entry>("animationName");
+      if (!name) return;
+      name->setText("attack");manager->findChildT<ui::Entry>("animationFrames")->setText("3");
+      manager->findChildT<ui::Entry>("animationDuration")->setText("120");
+      auto button=manager->findChild("animationCreate");author.stop();
+      down(button->bounds().center());up(button->bounds().center());createdFromDialog=true;
+    });
+    author.start();timeline->createAnimation(false);author.stop();repaint();
+    require(createdFromDialog && sprite->frameTags().getByName("attack"),"actual creation dialog must create the requested animation");
+    require(timeline->firstFrame()==13 && timeline->lastFrame()==15,"creation dialog must activate only the new animation");
+    if (const char* path=std::getenv("LIBRESPRITE_WORKFLOW_SCREENSHOT")) {
+      const auto png=she::instance()->encodeSurfaceAsPNG(manager->getDisplay()->getSurface());
+      std::ofstream output(path,std::ios::binary);output.write(reinterpret_cast<const char*>(png.data()),png.size());
+    }
+    std::cerr << "CHECK: independent layer keys/holds, duration-aware tween, Undo/Redo, isolated copies, actual animation dropdown and creation dialog passed\n";
+
     auto palette = app::ColorBar::instance()->getPaletteView();
     auto swatch = palette->getPaletteEntryBounds(1);
     auto swatchPoint = palette->bounds().origin()+gfx::Point(swatch.x+swatch.w/2,swatch.y+swatch.h/2);
