@@ -20,6 +20,7 @@
 #include "app/ini_file.h"
 #include "app/pref/preferences.h"
 #include "app/tools/ink.h"
+#include "app/tools/active_tool.h"
 #include "app/tools/pick_ink.h"
 #include "app/tools/tool.h"
 #include "app/ui/document_view.h"
@@ -238,7 +239,8 @@ bool StandbyState::onMouseDown(Editor* editor, MouseMessage* msg)
 
   if (clickedInk->isSelection()) {
     // Transform selected pixels
-    if (editor->isActive() &&
+    if (App::instance()->activeToolManager()->activeToolButton()==0 &&
+        editor->isActive() &&
         document->isMaskVisible() &&
         m_decorator->getTransformHandles(editor)) {
       TransformHandles* transfHandles = m_decorator->getTransformHandles(editor);
@@ -266,7 +268,8 @@ bool StandbyState::onMouseDown(Editor* editor, MouseMessage* msg)
     }
 
     // Move selected pixels
-    if (layer && editor->isInsideSelection() && msg->left()) {
+    if (layer && editor->isInsideSelection() &&
+        App::instance()->activeToolManager()->activeToolButton()==0) {
       if (!layer->isEditable()) {
         StatusBar::instance()->showTip(1000,
           "Layer '%s' is locked", layer->name().c_str());

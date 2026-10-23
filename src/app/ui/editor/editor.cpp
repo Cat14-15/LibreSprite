@@ -1102,7 +1102,8 @@ void Editor::updateToolLoopModifiersIndicators()
       gen::SelectionMode mode = Preferences::instance().selection.mode();
       if (int(action & KeyAction::AddSelection))
         mode = gen::SelectionMode::ADD;
-      if (int(action & KeyAction::SubtractSelection) || m_secondaryButton)
+      if (int(action & KeyAction::SubtractSelection) ||
+          (m_secondaryButton && App::instance()->activeToolManager()->activeToolButton()==1))
         mode = gen::SelectionMode::SUBTRACT;
       switch (mode) {
         case gen::SelectionMode::DEFAULT:  modifiers |= int(tools::ToolLoopModifiers::kReplaceSelection);  break;
@@ -1191,16 +1192,18 @@ bool Editor::onProcessMessage(Message* msg)
         m_oldPos = mouseMsg->position();
         updateToolByTipProximity(mouseMsg->pointerType());
 
-        if (!m_secondaryButton && mouseMsg->right()) {
-          m_secondaryButton = mouseMsg->right();
+        const bool secondaryChanged = !m_secondaryButton && mouseMsg->right();
+        if (secondaryChanged) m_secondaryButton = true;
 
+        // Resolve the assigned tool before computing selection modifiers.
+        // Otherwise every physical right click starts as Subtract Selection.
+        App::instance()->activeToolManager()
+          ->pressButton(pointer_from_msg(this, mouseMsg));
+        if (secondaryChanged) {
           updateToolLoopModifiersIndicators();
           updateQuicktool();
           setCursor(mouseMsg->position());
         }
-
-        App::instance()->activeToolManager()
-          ->pressButton(pointer_from_msg(this, mouseMsg));
 
         EditorStatePtr holdState(m_state);
         return m_state->onMouseDown(this, mouseMsg);

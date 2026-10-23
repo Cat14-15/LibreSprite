@@ -81,12 +81,7 @@ std::shared_ptr<Ink> ActiveToolManager::activeInk() const
   // A tool explicitly assigned to the right button uses that tool's
   // primary action. Without an assignment, keep the original secondary
   // action (e.g. Pencil paints with the background color).
-  const bool assignedRight =
-    (m_rightClick &&
-     m_rightClickAssignedTool &&
-     m_rightClickTool == m_rightClickAssignedTool);
-  std::shared_ptr<Ink> ink = tool->getInk(
-    assignedRight ? 0: (m_rightClick ? 1: 0));
+  std::shared_ptr<Ink> ink = tool->getInk(activeToolButton());
   if (ink->isPaint() && !ink->isEffect()) {
     tools::InkType inkType = Preferences::instance().tool(tool).ink();
     const char* id = nullptr;
@@ -123,6 +118,13 @@ std::shared_ptr<Ink> ActiveToolManager::activeInk() const
   }
 
   return ink;
+}
+
+int ActiveToolManager::activeToolButton() const
+{
+  const bool assignedRight = m_rightClick && m_rightClickAssignedTool &&
+    m_rightClickTool == m_rightClickAssignedTool;
+  return m_rightClick && !assignedRight ? 1 : 0;
 }
 
 Tool* ActiveToolManager::quickTool() const

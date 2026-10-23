@@ -18,6 +18,12 @@
 #include "app/context.h"
 #include "app/document.h"
 #include "app/animation_workflow.h"
+#include "app/tools/active_tool.h"
+#include "app/tools/tool_box.h"
+#include "app/tools/tool.h"
+#include "app/tools/ink.h"
+#include "app/pref/preferences.h"
+#include "doc/mask.h"
 #include "app/file/file.h"
 #include "app/cmd/set_cel_z_index.h"
 #include "app/context_access.h"
@@ -329,6 +335,118 @@ static int fullUI(const char* executable) {
       std::ofstream output(path,std::ios::binary);output.write(reinterpret_cast<const char*>(png.data()),png.size());
     }
     std::cerr << "CHECK: independent layer keys/holds, duration-aware tween, Undo/Redo, isolated copies, actual animation dropdown and creation dialog passed\n";
+
+    // Exercise real canvas input, not only the tool manager's selected icons.
+    auto toolSprite=doc::Sprite::createBasicSprite(doc::IMAGE_RGB,32,32,2);
+    auto toolDoc=new app::Document(toolSprite);app::UIContext::instance()->documents().add(toolDoc);
+    app::UIContext::instance()->setActiveDocument(toolDoc);
+    application.mainWindow()->layout();
+    repaint();
+    auto canvas=app::UIContext::instance()->activeEditor();canvas->setZoom(render::Zoom(8,1));canvas->updateEditor();canvas->centerInSpritePoint(gfx::Point(16,16));
+    auto toolLayer=static_cast<doc::LayerImage*>(toolSprite->folder()->getFirstLayer());
+    auto active=application.activeToolManager();auto toolbox=application.toolBox();auto& prefs=app::Preferences::instance();
+    prefs.document(toolDoc).grid.snap(false);prefs.selection.mode(app::gen::SelectionMode::DEFAULT);
+    auto clearAssignment=[&]{active->releaseButtons();if (active->rightClickAssignedTool()) active->toggleRightClickAssignedTool(active->rightClickAssignedTool());};
+    auto selectRight=[&](const char* id){clearAssignment();active->setSelectedTool(toolbox->getToolById("pencil"));active->toggleRightClickAssignedTool(toolbox->getToolById(id));repaint();};
+    auto deselect=[&]{app::UIContext::instance()->executeCommand(app::CommandsModule::instance()->getCommandByName(app::CommandId::DeselectMask));};
+    auto pixel=[&](int x,int y){return canvas->editorToScreen(gfx::Point(x,y))+gfx::Point(4,4);};
+    auto press=[&](gfx::Point p,ui::MouseButtons button){manager->handleMouseDown(p,button,ui::kKeyNoneModifier,ui::PointerType::Mouse,1);manager->pumpQueue();};
+    auto release=[&](gfx::Point p,ui::MouseButtons button){manager->handleMouseUp(p,button,ui::kKeyNoneModifier,ui::PointerType::Mouse);manager->pumpQueue();};
+    auto move=[&](gfx::Point p,ui::MouseButtons button){manager->handleMouseMove(p,button,ui::kKeyNoneModifier,ui::PointerType::Mouse,1);manager->pumpQueue();};
+    auto stroke=[&](ui::MouseButtons button,std::initializer_list<gfx::Point> points){auto it=points.begin();press(*it,button);for (++it;it!=points.end();++it) move(*it,button);release(*(points.end()-1),button);};
+    for (const char* id:{"rectangular_marquee","elliptical_marquee","lasso","polygonal_lasso","magic_wand"}) {
+      deselect();doc::clear_image(toolLayer->cel(0)->image(),0);
+      for (int y=3;y<=8;++y) for (int x=3;x<=8;++x) toolLayer->cel(0)->image()->putPixel(x,y,doc::rgba(210,40,30,255));
+      selectRight(id);
+      if (std::string(id)=="magic_wand") stroke(ui::kButtonRight,{pixel(5,5)});
+      else if (std::string(id)=="polygonal_lasso") {
+        stroke(ui::kButtonRight,{pixel(3,3),pixel(8,3)});
+        stroke(ui::kButtonRight,{pixel(8,3),pixel(8,8)});
+        stroke(ui::kButtonRight,{pixel(8,8),pixel(3,8)});
+        stroke(ui::kButtonRight,{pixel(3,8)});
+      }
+      else if (std::string(id)=="lasso") stroke(ui::kButtonRight,{pixel(3,3),pixel(8,3),pixel(8,8),pixel(3,8),pixel(3,3)});
+      else stroke(ui::kButtonRight,{pixel(3,3),pixel(8,8)});
+      require(toolDoc->isMaskVisible() && toolDoc->mask()->containsPoint(5,5),"right-assigned selection tool must CREATE a region on an empty selection");
+      require(!toolDoc->mask()->containsPoint(15,15),"selection tool must not select outside its region");
+      require(!canvas->hasCapture(),"completed right-button selection must release capture");
+      std::cerr << "CHECK: right-assigned " << id << " selects a real region\n";
+    }
+    // Without an assignment, retain ordinary right-button subtraction.
+    deselect();clearAssignment();active->setSelectedTool(toolbox->getToolById("rectangular_marquee"));repaint();
+    stroke(ui::kButtonLeft,{pixel(3,3),pixel(8,8)});
+    require(toolDoc->mask()->containsPoint(5,5),"left selection must remain functional");
+    stroke(ui::kButtonRight,{pixel(3,3),pixel(5,5)});
+    require(!toolDoc->mask()->containsPoint(4,4) && toolDoc->mask()->containsPoint(7,7),"unassigned right selection must still subtract");
+    deselect();selectRight("rectangular_marquee");active->setSelectedTool(toolbox->getToolById("rectangular_marquee"));stroke(ui::kButtonRight,{pixel(3,3),pixel(8,8)});
+    stroke(ui::kButtonRight,{pixel(5,5),pixel(8,5)});
+    require(canvas->isMovingPixels(),"right-assigned selection must drag selected pixels");
+    const int movedX=toolDoc->mask()->bounds().x;
+    stroke(ui::kButtonRight,{pixel(8,5),pixel(9,5)});
+    require(toolDoc->mask()->bounds().x==movedX+1,"second right drag must continue moving floating pixels");
+    canvas->dropMovingPixels();deselect();
+    auto resetCanvas=[&](doc::color_t color){
+      doc::ImageRef image(doc::Image::create(doc::IMAGE_RGB,32,32));doc::clear_image(image.get(),color);
+      auto cel=toolLayer->cel(0);cel->data()->setImage(image);cel->setPosition(0,0);cel->incrementVersion();toolDoc->notifyGeneralUpdate();repaint();
+    };
+    for (const char* id:{"pencil","line","rectangle","filled_rectangle","ellipse","filled_ellipse","paint_bucket","contour","polygon","curve"}) {
+      selectRight(id);resetCanvas(0);prefs.tool(toolbox->getToolById(id)).brush.size(1);
+      app::ColorBar::instance()->setBgColor(app::Color::fromRgb(20,80,220));
+      if (std::string(id)=="paint_bucket") stroke(ui::kButtonRight,{pixel(5,5)});
+      else if (std::string(id)=="contour") stroke(ui::kButtonRight,{pixel(3,3),pixel(8,3),pixel(8,8),pixel(3,8),pixel(3,3)});
+      else if (std::string(id)=="polygon") {
+        stroke(ui::kButtonRight,{pixel(3,3),pixel(8,3)});stroke(ui::kButtonRight,{pixel(8,3),pixel(8,8)});
+        stroke(ui::kButtonRight,{pixel(8,8),pixel(3,8)});stroke(ui::kButtonRight,{pixel(3,8)});
+      }
+      else if (std::string(id)=="curve") {
+        stroke(ui::kButtonRight,{pixel(3,3),pixel(8,8)});stroke(ui::kButtonRight,{pixel(4,8)});stroke(ui::kButtonRight,{pixel(7,3)});
+      }
+      else stroke(ui::kButtonRight,{pixel(3,3),pixel(8,8)});
+      bool painted=false;auto image=toolLayer->cel(0)->image();
+      for (int y=0;y<image->height();++y) for (int x=0;x<image->width();++x)
+        if (image->getPixel(x,y)==doc::rgba(20,80,220,255)) painted=true;
+      require(painted && !canvas->hasCapture(),"right-assigned painting tool must draw with the right-button color and finish its stroke");
+      std::cerr << "CHECK: right-assigned " << id << " paints and releases capture\n";
+    }
+    for (const char* id:{"spray","blur","jumble"}) {
+      selectRight(id);resetCanvas(0);prefs.tool(toolbox->getToolById(id)).brush.size(5);
+      if (std::string(id)!="spray") {
+        auto image=toolLayer->cel(0)->image();
+        for (int y=0;y<32;++y) for (int x=0;x<32;++x) image->putPixel(x,y,doc::rgba((x+y)%2?255:0,0,0,255));
+      }
+      doc::ImageRef before(doc::Image::createCopy(toolLayer->cel(0)->image()));
+      stroke(ui::kButtonRight,{pixel(5,5),pixel(10,5),pixel(10,10),pixel(5,10),pixel(5,5)});
+      bool changed=false;auto cel=toolLayer->cel(0);
+      for (int y=0;y<cel->image()->height();++y) for (int x=0;x<cel->image()->width();++x) {
+        const int sx=x+cel->x(),sy=y+cel->y();
+        if (sx>=0 && sy>=0 && sx<32 && sy<32 && cel->image()->getPixel(x,y)!=before->getPixel(sx,sy)) changed=true;
+      }
+      require(changed && !canvas->hasCapture(),"right-assigned spray/effect must modify actual pixels and end the stroke");
+      std::cerr << "CHECK: right-assigned " << id << " changes real pixels\n";
+    }
+    selectRight("move");resetCanvas(doc::rgba(210,40,30,255));
+    stroke(ui::kButtonRight,{pixel(5,5),pixel(8,8)});
+    require(toolLayer->cel(0)->x()==3 && toolLayer->cel(0)->y()==3,"right-assigned move must translate the actual cel");
+    selectRight("hand");auto panPoint=pixel(16,16);auto beforePan=canvas->screenToEditor(panPoint);
+    stroke(ui::kButtonRight,{panPoint,panPoint+gfx::Point(24,16)});
+    require(canvas->screenToEditor(panPoint)!=beforePan,"right-assigned hand must pan the canvas");
+    selectRight("eraser");resetCanvas(doc::rgba(210,40,30,255));prefs.tool(toolbox->getToolById("eraser")).brush.size(1);
+    stroke(ui::kButtonRight,{pixel(5,5)});
+    auto erased=toolLayer->cel(0);require(doc::rgba_geta(erased->image()->getPixel(5-erased->x(),5-erased->y()))==0,"assigned eraser must erase, not replace foreground/background colors");
+    selectRight("zoom");const double zoomBefore=canvas->zoom().scale();stroke(ui::kButtonRight,{pixel(16,16)});
+    require(canvas->zoom().scale()>zoomBefore,"assigned zoom must use the tool's primary zoom-in action");
+    clearAssignment();active->setSelectedTool(toolbox->getToolById("zoom"));stroke(ui::kButtonRight,{pixel(16,16)});
+    require(canvas->zoom().scale()==zoomBefore,"native zoom right-click must keep zoom-out behavior");
+    resetCanvas(doc::rgba(210,40,30,255));
+    deselect();selectRight("eyedropper");
+    app::ColorBar::instance()->setFgColor(app::Color::fromRgb(1,2,3));
+    stroke(ui::kButtonRight,{pixel(5,5)});
+    require(app::ColorBar::instance()->getFgColor().getRed()==210,"right-assigned eyedropper must pick into foreground");
+    clearAssignment();active->setSelectedTool(toolbox->getToolById("eyedropper"));
+    app::ColorBar::instance()->setBgColor(app::Color::fromRgb(1,2,3));stroke(ui::kButtonRight,{pixel(5,5)});
+    require(app::ColorBar::instance()->getBgColor().getRed()==210,"unassigned eyedropper right click must retain background sampling");
+    std::cerr << "CHECK: assigned and native right-click eyedropper sample correctly\n";
+    clearAssignment();active->setSelectedTool(toolbox->getToolById("pencil"));repaint();
 
     auto palette = app::ColorBar::instance()->getPaletteView();
     auto swatch = palette->getPaletteEntryBounds(1);

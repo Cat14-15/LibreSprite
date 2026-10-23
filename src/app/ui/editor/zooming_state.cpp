@@ -12,6 +12,7 @@
 #include "app/ui/editor/zooming_state.h"
 
 #include "app/app.h"
+#include "app/tools/active_tool.h"
 #include "app/ui/editor/editor.h"
 #include "app/ui/status_bar.h"
 #include "doc/sprite.h"
@@ -53,7 +54,7 @@ bool ZoomingState::onMouseUp(Editor* editor, MouseMessage* msg)
   if (!m_moved) {
     render::Zoom zoom = editor->zoom();
 
-    if (msg->left())
+    if (App::instance()->activeToolManager()->activeToolButton()==0)
       zoom.in();
     else if (msg->right())
       zoom.out();

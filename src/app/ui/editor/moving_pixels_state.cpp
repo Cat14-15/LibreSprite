@@ -22,6 +22,7 @@
 #include "app/modules/gui.h"
 #include "app/pref/preferences.h"
 #include "app/tools/ink.h"
+#include "app/tools/active_tool.h"
 #include "app/tools/tool.h"
 #include "app/ui/context_bar.h"
 #include "app/ui/editor/editor.h"
@@ -256,10 +257,10 @@ bool MovingPixelsState::onMouseDown(Editor* editor, MouseMessage* msg)
     }
   }
 
-  // Start "moving pixels" loop. Here we check only for left-click as
-  // right-click can be used to deselect/subtract selection, so we
-  // should drop the selection in this later case.
-  if (editor->isInsideSelection() && msg->left()) {
+  // Move with the tool's primary action, including an assigned right
+  // button. The unassigned right action still deselects/subtracts.
+  if (editor->isInsideSelection() &&
+      App::instance()->activeToolManager()->activeToolButton()==0) {
     // In case that the user is pressing the copy-selection keyboard shortcut.
     EditorCustomizationDelegate* customization = editor->getCustomizationDelegate();
     if ((customization) &&

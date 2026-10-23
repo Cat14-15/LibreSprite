@@ -29,6 +29,9 @@ public:
   Tool* activeTool() const;
   std::shared_ptr<Ink> activeInk() const;
 
+  // Tool action slot, distinct from the physical button used for capture.
+  int activeToolButton() const;
+
   // Returns the quick tool.
   Tool* quickTool() const;
 

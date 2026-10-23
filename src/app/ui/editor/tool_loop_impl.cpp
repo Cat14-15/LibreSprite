@@ -23,6 +23,7 @@
 #include "app/modules/palettes.h"
 #include "app/pref/preferences.h"
 #include "app/tools/controller.h"
+#include "app/tools/active_tool.h"
 #include "app/tools/freehand_algorithm.h"
 #include "app/tools/ink.h"
 #include "app/tools/point_shape.h"
@@ -113,10 +114,10 @@ public:
     , m_contiguous(m_toolPref.contiguous())
     , m_button(button)
     , m_ink(ink->clone())
-    , m_controller(m_tool->getController(m_button))
-    , m_pointShape(m_tool->getPointShape(m_button))
-    , m_intertwine(m_tool->getIntertwine(m_button))
-    , m_tracePolicy(m_tool->getTracePolicy(m_button))
+    , m_controller(m_tool->getController(button==tools::ToolLoop::Left ? 0 : App::instance()->activeToolManager()->activeToolButton()))
+    , m_pointShape(m_tool->getPointShape(button==tools::ToolLoop::Left ? 0 : App::instance()->activeToolManager()->activeToolButton()))
+    , m_intertwine(m_tool->getIntertwine(button==tools::ToolLoop::Left ? 0 : App::instance()->activeToolManager()->activeToolButton()))
+    , m_tracePolicy(m_tool->getTracePolicy(button==tools::ToolLoop::Left ? 0 : App::instance()->activeToolManager()->activeToolButton()))
     , m_symmetry(nullptr)
     , m_colorTarget(m_layer ? ColorTarget(m_layer):
                               ColorTarget(ColorTarget::BackgroundLayer,
@@ -530,7 +531,7 @@ tools::ToolLoop* create_tool_loop(Editor* editor, Context* context)
   // isFloodFill) because we need the original layer source
   // image/pixels to stop the flood-fill algorithm.
   if (current_ink->isSelection() &&
-      !current_tool->getPointShape(editor->isSecondaryButton() ? 1: 0)->isFloodFill()) {
+      !current_tool->getPointShape(App::instance()->activeToolManager()->activeToolButton())->isFloodFill()) {
     layer = nullptr;
   }
   else {
